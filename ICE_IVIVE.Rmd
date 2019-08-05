@@ -1,0 +1,236 @@
+---
+title: "ICE IVIVE workflow"
+Date: 06/05/2019
+Note: Uses ICE2.0
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+Author: ILS
+---
+#Description
+
+The workflow allows the flexibility to select from three different rat and human PK models: a 1 compartment model that incorporates Monte Carlo simulation to simulate the population variance (1C), a 3 compartment model leveraging the  [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk) (Solve_3comp), and a pbpk model that is tailored for compounds with additional glucuronidation(3CGlu). The workflow is to predict the daily equivalent administered dose (EAD, mg/kg/day) that would lead to steady state blood concentration equivalent to the bioactive concentration from in vitro assays and compared to the predicted lowest effective levels (LELs) of in vivo assays, which is user provided
+
+#load libraries
+
+```{r}
+# libraries only needed for glucuronidation models ("3CGlu", "Solve_3comp")
+library(plyr) # splitting, combining and applying data
+library(deSolve) # Solves for initial value problems of differential equations
+library(tidyr) # helps tidy data easily
+library(ggplot2) # for creating elegant complex plots
+library(scales) # scaling functions for visualizing
+library(foreach) # for copying functions and libraries to each cluster 
+library(doParallel) # for parallelization 
+```
+
+#input variables
+There are several input variables needed to run the code. Some variables are model specific, as detailed.
+```{r}
+f0 <- "ChemicalData_rnotebook.txt" # chemicals dats from ICE, include CASRN field as identifier
+f1 <- "invitroData_xc.txt" # invitro data from ICE, includes CASRN field as identifier then acc/ac50 values
+species <- "human" # human or rat
+modelType <- "3CGlu" # "1C", "3CGlu", "Solve_3comp"
+
+output_file <- "outtest2.txt"
+```
+For the 1 compartment model, values are needed to parameterize the Monte Carlo simulation
+```{r}
+nsamples <- 300 # user-provided value for the mc simulations, any number between 10 - 10,000
+```
+For the pbpk models some addtional parameters can be modified
+```{r}
+route <- "oral" # oral or iv, only needed for pbpk models ("3CGlu", "Solve_3comp")
+interv <- 24 #dosing interval, hours, only needed for glucuronidation models ("3CGlu", "Solve_3comp")
+ndays <- 3 #number of days dosin is done, only needed for glucuronidation models ("3CGlu", "Solve_3comp")
+ncores <- 4 #this is specific for the "3CGlu" to conduct parallelization
+```
+
+#load functions
+
+```{r}
+#All required R scripts and input files should be in the working directory
+source("steadyState.R") # required for 1C model
+source("glu_MaxConc.R") # required for "3CGlu"
+source("CalcEAD.R") # required for 1C and 3CGlu
+source("EADboxplot.R") # required for plotting
+```
+
+#load data
+
+```{r}
+chemical <- read.table(f0, sep = "\t", header = TRUE, quote = "", stringsAsFactors = FALSE) #Modify the input if needed for single quotes
+chemical[1:2,]
+```
+
+```{r}
+invitro <- read.table(f1, sep = "\t", header = TRUE)
+invitro[1:2,]
+```
+
+#preparing data
+Minor prep work is done on the data that comes from ICE 
+Partitioning coefficients are only needed for the 3CGlu model as they are not calculated as part of the workflow here.
+These can be obtained by running the "predict_partitioning_schmitt" function from the httk package.
+
+```{r}
+## input data assigned as chemical, column names should be labeled correctly 
+## Following columns are required for glucuronidation models, 1C does not require partitioning coefficiets in order to run
+## Funbound. should be fu, Kkidney2pu should be pkidney, Kliver2pu should be pliver, Krest2pu should be pbody
+#colnames(chemical) <- gsub("Funbound.*", "fu", colnames(chemical))
+
+#Converting units for internsic clearance values
+chemical$Clint <- 10^chemical$Clint #this moves from log10 ul/ml/10^6 cells to just ul/ml/10^6 cells
+
+#setting constants:
+#dose = 1 #current calcualtions assume 1mg/kg/day
+
+if (is.null(species)) {
+  species <- "Human"
+}
+if (is.null(route)) {
+  iv.dose <- TRUE
+}
+if (is.null(nsamples)) {
+  nsamples <- 1000
+}
+if(!exists("dose") || is.null(dose)){
+  dose <- 1
+}
+if(!exists("ConcentrationUnit") || is.null(ConcentrationUnit)){
+  ConcentrationUnit <- "uM"
+}
+if(!exists("ncores") || is.null(ncores)){
+  ncores<-detectCores() - 1
+}
+```
+
+#if modelType given by the user is "1C"
+
+```{r}
+if (modelType == "1C") {    ### modelType needs to be selected as 1C in order for this step to work 
+  
+  chemInput <- chemical[,c("CASRN", "ChemicalName", "Clint", "fu", "MW")] ## subsetting chemical data for columns of interest
+  
+  CSS <- steadyState(inputData = chemInput, nsamples = nsamples, species = species, ConcentrationUnit = ConcentrationUnit) ## for this function to work SteadyState.R should be loaded in the enviornment
+  
+  EAD.out50 <- CalcEAD(Css = CSS[,c("CASRN", "50%", "fu")], inVitro = invitro, adj.fu = "fu") ## CalcEAD.R should be loaded in the enviornment
+  colnames(EAD.out50) <- gsub("EAD","EAD.50", colnames(EAD.out50))
+  EAD.out95 <- CalcEAD(Css = CSS[,c("CASRN", "95%", "fu")], inVitro = invitro, adj.fu = "fu")
+  colnames(EAD.out95) <- gsub("EAD","EAD.95", colnames(EAD.out95))
+  EAD.out <- join_all(list(EAD.out50,EAD.out95))
+  EAD.out <- EAD.out[,setdiff(colnames(EAD.out), c("adj.fu", "fu", "adj.arm","arm"))] # remove the columns "fu", adj.fu","adj.arm" and "arm"
+  
+ #creating output file, should have EAD values and the parameters for calculating the circulating concentration
+  
+  CSS2 <- as.data.frame(CSS, stringsAsFactors = FALSE); colnames(CSS2) <- gsub("50%", "Css, 50%ile", colnames(CSS2)); colnames(CSS2) <- gsub("95%", "Css, 95%ile", colnames(CSS2))
+  CSS2$Species<-species;CSS2$Model<-"1-compartment"; CSS2$"dose, mg/kg"<-dose; CSS2$"nSimulations" <- nsamples; CSS2$route<-route
+ 
+   CSS2<-CSS2[,c("CASRN", "ChemicalName", "Css, 50%ile","Css, 95%ile", "Css_Unit", "Species","Model","dose, mg/kg", "route",
+                "Clint", "fu", "MW")]
+ 
+  ssEAD.out <- EAD.out[,c("CASRN", setdiff(colnames(EAD.out), c(colnames(invitro), "50%","95%")))]
+  outputData <- join_all(list(CSS2,ssEAD.out))
+  
+  write.table(outputData, file = output_file, sep = '\t', col.names = TRUE, row.names = FALSE, quote = FALSE)#output file for user
+  EADplot <- EADboxplot(EAD.out = outputData,label="EAD.50", species = species, route = route, modelType = modelType)
+}
+```
+
+
+#if modelType given by the user is "3CGlu"
+Note that this model requires some addtional physioloigical properties
+
+```{r}
+if (modelType == "3CGlu") { ## modelType needs to be selected as 3CGlu in order for this step to work 
+  #Developing table for physical data
+  physParam <- data.frame(species = c("human", "rat"), bw = c(70, 0.25), QC.mLmin = c(5600, 74), QliverC = c(0.26, 0.186), QkidneyC = c(0.22, 0.124), VplasmaC = c(0.043, 0.0312), VliverC = c(0.024, 0.078), VkidneyC = c(0.004, .0148), enterocytes = c(0.1223, 0.001407))
+  #values for organ volumes from Davies et al 1993, table 2
+  #these would ideally be supplied from user, defaults exist for the glucoronidated compound
+  t1 <- data.frame(CASRN = chemical$CASRN, vmaxliver = NA, kmliver = NA,kuptakeC = NA, kGIingC = NA, kmgutg = 58400, vmaxgutgc = 361, fgutg = 1, fliverg = 1)
+ #this would be data coming to ICE from OPERA; partitioning coeff could come from within
+  chemParam <- as.data.frame(merge(chemical, t1), stringsAsFactors = FALSE)
+  
+  cl<-ncores; registerDoParallel(cl)
+  Cmax.glu<- foreach(i = 1:nrow(chemParam),.combine = rbind) %dopar% {glu_MaxConc(physParam, chemParam[i,], Species = species, route =route, interv = interv , ndays = ndays, dose=dose, ConcentrationUnit = ConcentrationUnit)};
+  
+  #Calculating the EADs
+  EAD.out_max <- CalcEAD(Css = Cmax.glu[,c("CASRN", "cmax")], inVitro = invitro)
+   Cmax.glu$Species<-species;Cmax.glu$Model<-"3C Gluc"; Cmax.glu$Dose<-dose;
+  
+  ssEAD.out <- EAD.out_max[,c("CASRN", setdiff(colnames(EAD.out_max), c(colnames(invitro), "cmax")))]
+  Cmax.glu$days <- ndays
+  colnames(Cmax.glu)<-gsub("cmax", "Cmax", colnames(Cmax.glu)); colnames(Cmax.glu)<-gsub("Cmax_unit", "Cmax_Unit", colnames(Cmax.glu))
+  Cmax.glu <- Cmax.glu[,c("CASRN", "ChemicalName", "Cmax", "Cmax_Unit", "Species", "Model", "dose, mg/kg", "route", "interv", "days")]
+  
+  outputData <- join_all(list(Cmax.glu,ssEAD.out))
+  write.table(outputData, file = output_file, sep = '\t', col.names = TRUE, row.names = FALSE, quote = FALSE)#output file for user
+  EADplot <- EADboxplot(EAD.out = outputData,label="EAD", species = species, route = route, modelType = modelType)
+}
+```
+
+#if modelType given by the user is "Solve_3comp"
+
+```{r}
+if (modelType == "Solve_3comp") { ## modelType needs to be selected as Solve_3comp in order for this step to work 
+  library(httk)
+  #preprocessing variables:
+  if (tolower(species) == "rat") {
+    species_1 <- "Rat"
+  }
+  if (tolower(species) == "human") {
+    species_1 <- "Human"
+  }
+  # Processing the chem information
+  # ##will need to verify the labels on the opera data
+  # chems <- as.data.frame(read.table(f0, header = TRUE, sep = "\t", stringsAsFactors = FALSE, quote ="",     na.strings = c("", "NA")))
+  # inVitro <- read.table(f1, sep = "\t", header = TRUE)
+  options(stringsAsFactors = FALSE)
+  chem3cInput <- chemical[,setdiff(colnames(chemical), c("pkidney","pliver","pbody","Kgut2pu"))]#removing     the partitioning coefficience
+  chem3cInput$logPwa <- 1*chem3cInput$HL #this gets the water octanal coeff
+  #chemical$ClintNorm<-10^chemical$CLint #to get into correct units   #this is addressed in preprocessing
+
+  #add chemical info to the table. Using variable coming from ICE
+
+chem.physical_and_invitro.data <- add_chemtable(chem3cInput, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN", Clint = "Clint", Funbound.plasma = "fu", pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
+
+  if (route == "oral") {
+    iv.dose = FALSE
+  } else {iv.dose = TRUE}
+  
+  EDcmax3day.3comp <- NULL
+  cmax3dayivall <- NULL
+  
+  for (this.cas in chem3cInput[,'CASRN']) {
+    outiv <- solve_3comp(chem.cas = this.cas, parameters = NULL, doses.per.day = 24/interv, days = ndays,tsteps = 4, daily.dose = 1, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
+    concMax <- max(outiv[,'Cplasma'])
+    cmax3dayiv <- as.data.frame(cbind(this.cas,concMax, ConcentrationUnit))
+    cmax3dayivall <- rbind(cmax3dayivall,cmax3dayiv)
+    cmax3dayivall$concMax <- as.numeric(cmax3dayivall$concMax)
+  }
+  Cmax <- merge(chem3cInput, cmax3dayivall, by.x = "CASRN", by.y = "this.cas")
+  #outcmax3dayiv <- ThreeC_httk(chemical, species = species_1, iv.dose)
+ 
+  #Calculating the EADs
+  EAD.out_max <- CalcEAD(Css = Cmax[,c("CASRN", "concMax")], inVitro = invitro)
+  ssEAD.out <- EAD.out_max[,c("CASRN", setdiff(colnames(EAD.out_max), c(colnames(invitro), "Cmax")))]
+  names(ssEAD.out) <- gsub("concMax", "Cmax", names(ssEAD.out) )
+  
+  names(Cmax) <- gsub("concMax", "Cmax", gsub("ConcentrationUnit", "Cmax_Unit", names(Cmax) ) )
+  Cmax$route <- route
+  Cmax$interv <- interv
+  Cmax$days <- ndays
+  Cmax$Species<-species; Cmax$Model<-"Solve_3comp"; Cmax$"dose, mg/kg"<-dose;
+  Cmax <- Cmax[, c("CASRN", "ChemicalName", "Cmax", "Cmax_Unit", "Species", "Model", "dose, mg/kg","interv","days")]
+  outputData <- join_all(list(Cmax,ssEAD.out))
+  
+  write.table(outputData, file = output_file, sep = '\t', col.names = TRUE, row.names = FALSE, quote = FALSE)#output file with results
+  EADplot <- EADboxplot(EAD.out = outputData, label="EAD", species = species, route = route, modelType = modelType)
+}
+```
+
+
+```{r}
+sessionInfo()
+```
