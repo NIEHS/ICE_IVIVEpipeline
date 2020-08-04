@@ -7,6 +7,8 @@ The workflow allows the flexibility to select from three different rat and human
 	library(tidyr) # helps tidy data easily
 	library(ggplot2) # for creating elegant complex plots
 	library(scales) # scaling functions for visualizing
+	library(foreach) # for copying functions and libraries to each cluster 
+	library(doParallel) # for parallelization 
 
 # Input files
 	ChemicalData_rnotebook.txt: example data file of the chemical property data needed to run the workflow
@@ -17,5 +19,5 @@ The workflow allows the flexibility to select from three different rat and human
 	glu_MaxConc.R: 3 compartment model that calculates the maximum plasma concentration of a chemical assuming BPA-like properties for glucoronidation
 	CalcEAD.R: calculates the estimated administered dose based on a given plasma concentration and invitro tests
 	EADboxplot.R: generates boxplots of the EAD values for each chemical based on the in vitro activity concentrations
-	ICE_iviveScript.Rmd: the R notebook with the workflow code
+	ICE_IVIVE.Rmd: the R notebook with the workflow code
 
