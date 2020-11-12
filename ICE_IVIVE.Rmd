@@ -188,7 +188,8 @@ xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, 
 to view the results, the "EADboxplot" function plots the values. 
 ```{r}
 #plotting
-EADplot <- EADboxplot(EAD.out = outputData,label="EAD", species = species, route = route, modelType = modelType)
+EADplot <- EADboxplot(EAD.out = outputData,label="EAD", species = species, route = route, modelType = modelType, chemDisplay = "CASRN")
+EADplot
 
 ```
 
@@ -312,18 +313,12 @@ xlsx::write.xlsx(file=Userout,x=outputData, sheetName ="EADResults", append=FALS
 xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE) 
 ```
 to view the results, the "EADboxplot" function plots the values. 
+Note that if the gas model is used EADUnit needs to be changed to "uM"
 ```{r}
 #plotting
-EADplot <- EADboxplot(EAD.out = outputData,label="EAD", species = species, route = route, modelType = modelType)
+EADplot <- EADboxplot(EAD.out = outputData,label="EAD", EADUnit="mg/kg/dose", species = species, route = route, modelType = modelType, chemDisplay = "CASRN")
+EADplot
 ```
-<!-- # Saving the EAD plots -->
-<!-- EAD box plots are generated within the model functions. This chunk saves the plot as a pdf. If a different file type is desired see [this cookbook on file outputs](http://www.cookbook-r.com/Graphs/Output_to_a_file/)  -->
-<!-- ```{r} -->
-<!-- pdf(EADplot_file) -->
-<!-- EADplot -->
-<!-- dev.off() -->
-<!-- ``` -->
-
 
 # Information on the session
 ```{r}
