@@ -10,8 +10,8 @@ The workflow allows the flexibility to select from three different rat and human
 	
 
 # Input files
-	ChemicalData_rnotebook.txt: example data file of the chemical property data needed to run the workflow
-	invitroData_xc.txt: example data file of the in vitro assay data needed to run the workflow. Note that the first column must be a CASRN and the following columns assay response values in units matching those that the plasma concentration of chemical are in
+	ChemicalData_Rnotebookv3.2.txt: example data file of the chemical property data needed to run the workflow
+	InvitroData_Rnotebookv3.2.txt: example data file of the in vitro assay data needed to run the workflow. Note that the first column must be a CASRN and the following columns assay response values in units matching those that the plasma concentration of chemical are in
 
 # Code files
 	steadyState.R: the 1 compartment tk model that calculates a steady state plasma concentration of a given chemical
