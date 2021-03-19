@@ -19,3 +19,19 @@ The workflow allows the flexibility to select from three different rat and human
 	EADboxplot.R: generates boxplots of the EAD values for each chemical based on the in vitro activity concentrations
 	ICE_IVIVE.Rmd: the R notebook with the workflow code
 
+
+# ICE_PBPKpipeline
+The workflow allows the flexibility to select from two different rat and human PK models from the EPA’s httk package: (solve_pbtk), and (Solve_gas_pbtk). The workflow is to predict plasma and tissue concentration profiles across time following a dose of a substance. Exposure routes include oral ingestion (solve_pbtk), intrevenous (solve_pbtk), and inhalation (solve_gas_pbtk). For inhalation exposures using the dose is provided as an air concentration.
+
+# Required libraries
+	library(tidyverse)
+	library(deSolve)
+	library(doParallel)
+	library(httk)  #this is needed for models: Solve_3comp, Solve_pbtk. # The code is compatible with httk_2.0.2
+	library(openxlsx)  #for writing the excel file that is user output
+	library(data.table)
+	
+# Input files
+	ChemicalData_Rnotebook.txt
+
+
