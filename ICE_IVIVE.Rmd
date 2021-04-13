@@ -1,11 +1,10 @@
 ---
 title: "ICE IVIVE workflow"
-Date: 03/18/2021
+Date: 11/05/2020 lasted modified on 04/05/2021 to correct gas repeat dosing by Xiaoqing Chang
 Note: Used ICE 3.3 and higher;relies on httk 2.0.2
 output:
-  html_document: null
+  #html_document: default
   pdf_document: default
-always_allow_html: yes
 Author: ILS (comptox@ils-inc.com)
 ---
 
@@ -25,9 +24,8 @@ opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
 
 The workflow allows the flexibility to select from three different rat and human PK models: a 1 compartment model that incorporates Monte Carlo simulation to simulate the population variance (1C), a 3 compartment model leveraging the  [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk) (Solve_3comp), (solve_pbtk), and (Solve_gas_pbtk). The workflow is to predict the daily equivalent administered dose (EAD, mg/kg/dose) that would lead to steady state blood concentration equivalent to the bioactive concentration from in vitro assays. For inhalation exposures using the (Solve_gas_pbtk) EADs are  generated in uM if using "concentration" exposure vs a dose. 
 2 example files are included:
-
-* ChemicalData_Rnotebook.txt
-* InvitroData_Rnotebook.txt
+* ChemicalData_Rnotebookv3.2.txt
+* InvitroData_Rnotebookv3.2.txt
 
 # Load libraries
 
@@ -45,18 +43,23 @@ library(xlsx) #for writing the excel file that is user output
 There are several input variables needed to run the code. Some variables are model specific, as detailed.
 Adjust the file paths to point to the file in your directory.
 
-chemFile: the file containing chemical data from ICE. This has the CASRN as the first field
+chemFile: the file containing chemical data from ICE. this has the CASRN as the first field
 assayFile: the file with the in vitro bioactivity data. The first column is the CASRN and the subsequent columns are the bioactivity values
 output_file: this is the file for the outputs
 
 ```{r}
-chemFile <- "ChemicalData_Rnotebook.txt" # chemicals data from ICE, include CASRN 
-                                         # field as identifier
-assayFile <- "InvitroData_Rnotebook.txt" # invitro data from ICE, includes CASRN 
-                                         # field as identifier then acc/ac50
-Userout <- "User_Results.xlsx" # file name (and path) for the output file for the tissue 
-                      # concentrations with EAD estimations along with the in vitro data
+chemFile <- "ChemicalData_Rnotebook.txt" #chemicals data from ICE, include CASRN 
+                                         #field as identifier
+assayFile <- "InvitroData_Rnotebook.txt" #invitro data from ICE, includes CASRN 
+                                         #field as identifier then acc/ac50
+Userout <- "User_Results.xlsx" #file name (and path) for the output file for the tissue 
+                      #concentrations with EAD estimations along with the in vitro data
 EADplot_file <-"User_plot.pdf" #the file for the plot of the EAD plot
+
+invivo <- NULL         #invivo data provided by user                   
+#invivoFile <- "InvivoData_Rnotebook.txt"
+#invivo <- as.data.frame(read_delim(invivoFile, delim = "\t"))    
+
 ```
 # Model variables
 Details about what model, route, and dose need to be specified. There are differences in what is needed if a 1 compartment model is used vs the PBPK models
@@ -64,33 +67,37 @@ Details about what model, route, and dose need to be specified. There are differ
 ## What model?
 Models type is limited to 4 different models. Currently, species in ICE is limited to human or rat. Using this notebook one can expand the species with minor editing of the code provided the parameters are available. 
 ```{r}
-species <- "human" # human or rat
-modelType <-  "solve_pbtk" # "1C", solve_3comp", "solve_pbtk", "solve_gas_pbtk"
+species <- "human" #human or rat
+modelType <-  "1C" #"1C", solve_3comp", "solve_pbtk", "solve_gas_pbtk"
 ```
 For the 1 compartment model, values are needed to parameterize the Monte Carlo simulation. 
 ```{r}
-nsamples <- 300 # user-provided value for the mc simulations, any number between 10 - 10,000
+nsamples <- 300 #user-provided value for the mc simulations, any number between 10 - 10,000
 ```
-For the PBPK models some additional parameters can be modified. An inhalation exposure has additional parameters.
-The route determines where the chemical will enter the system. Exposure route, interval, and days are needed for all PBPK models. 
+For the PBPK models some additional parameters can be modified. An inhalation exposure has additional parameters
+The route determines where the chemical will enter the system and route, interval, and days are needed for all PBPK models. 
 ```{r}
-route <- "oral" # oral, iv, or inhalation needed for PBPK models. 
-                # "Solve_gas_pbtk" uses the inhalation route 
-interv <- 24 #dosing interval, hours
-ndays <- 3 #number of days dosing is done
-expPeriod<-24 #length of time between exposures, hours
-expDose <- 1 #current calcualtions assume 1mg/kg/dose
-ConcentrationUnit <- "uM" #this is not available on the UI currently, 
-                          #options are uM and mg/L
+route <- "iv"   #oral, iv, or inhalation needed for PBPK models. 
+#"Solve_gas_pbtk" uses the inhalation route 
+interv <- 24   #dosing interval, hours
+ndays <- 3       #number of days dosing is done
+#expPeriod<-12   #length of time between exposures, hours
+expDose <- 1     #current calculations assume 1mg/kg/dose for "1C", "solve_3comp", "solve_pbtk";  
+ConcentrationUnit <- "uM"       #this is not available on the UI currently, options are uM and mg/L
+chemDisplay <- "ChemicalName"   #Argument for EADboxplot.R, choice is "CASRN" or "ChemicalName"
+EADUnit <- "mg/kg/dose"         #Argument for EADboxplot.R, "mg/kg/dose" for "1C", "solve_3comp", "solve_pbtk"; 
+                                #uM for "solve_gas_pbpk" model
+
 ```
-## Inhalation specific parameters
-For an inhalation route of exposure, the "expDose" exposure route is currently not available. Instead, the "expConc" exposure route, which is more typical of a gas exposure, can be used. This models an inhaled concentration over a duration of time, set by "expLength".
+##Inhalation specific parameters
+For an inhalation route of exposure, there are 2 different ways that the exposure can be modeled. "expDose" models a set bolus dose like the exposure for an oral or IV exposure. The "expConc" is more typical of a gas exposure. This models an inhaled concentration over a duration of time, set by "expLength".  The "expDose" option is currently unavailable.
 ```{r}
-gasDosing <-"expConc" # two dosing methods for Solve_gas_pbtk model, 
-                      # "expConc" and "expDose"
-#This is only needed if gasDosing =="expConc" bc otherwise default to expDose
+gasDosing <-"expConc" #two dosing option methods for Solve_gas_pbtk model, 
+#"expConc" and "expDose", 
+#but for ICE3.3 release, "expConc" is the only option due to a bug found in httk function
+#This is only needed if gasDosing =="expConc" because otherwise default to expDose
 if(gasDosing =="expConc" & (!exists("expConc") || is.null(expConc))){
-  expConc <- 1 #current calcualtions assume 1mg/kg/dose
+  expConc <- 1 #current calculations assume 1uM of air concentration
 }
 expLength <- .25 #length of the gas exposure, hours
 ```
@@ -98,18 +105,17 @@ expLength <- .25 #length of the gas exposure, hours
 # Load functions
 ```{r}
 #All required R scripts and input files should be in the working directory
-source("steadyState.R") # required for "1C" model
-source("CalcEAD.R") # required for "1C", "solve_3comp", 
-                    # "solve_pbtk", and "solve_gas_pbpk" models
+source("steadyState.R") #required for "1C" model
+source("CalcEAD.R") #required for "1C", "solve_3comp", "solve_pbtk", "solve_gas_pbpk" models
 source("EADboxplot.R")
 ```
 
 # Load data
-Notice that the chemical input has the source of the FU and Clint data. ICE now has 2 different sources of these values so the source is important for tracking this information.
+Notice that the chem input has the source of the FU and Clint data. ICE now has 2 different sources of these values so the source is important for tracking this information.
 
 ```{r}
-chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) #there are single quotes 
-                    #in chemical names that need to be addressed, the tidyR handels well
+#there are single quotes in chemical names that need to be addressed, the tidyR handels well
+chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) 
 chemical[1:2,]
 ```
 
@@ -119,12 +125,12 @@ invitro[1:2,]
 ```
 
 # Preparing data
-Minor prep work is done on the data that comes from ICE. 
-Partitioning coefficients are obtained by internal function from the httk package using the provided phys chem parameters. Compare with the example input file for naming.
-Note that a few checks are done - these will generate flags that can be used to follow up as needed.
+Minor prep work is done on the data that comes from ICE 
+Partitioning coefficients are obtained by internal function from the httk package using the provided phys chem parameters. Compare with the example input file for naming
+Note that a few checks are done. These will generate flags that can be used to follow up as needed.
 
 ```{r}
-##  column names should be labeled correctly. RegEx have been used to help, see the example file
+##column names should be labeled correctly. RegEx have been used to help, see the example file
 
 #cleaning the names for taking from an ICE Query-stricter matching is used to handel including the ADME source information
 colnames(chemical)<-gsub(".*Name.*", "ChemicalName", colnames(chemical))
@@ -140,8 +146,8 @@ colnames(chemical)<-gsub(".*pKa, Basic.*", "pka_Accept", colnames(chemical))
 colnames(chemical)<-gsub(".*pKa, Acidic.*", "pka_Donor", colnames(chemical))
 
 #Converting units for internsic clearance values
-chemical$Clint<-10^chemical$Clint #this moves from log10 ul/ml/10^6 
-                                  #cells to just ul/ml/10^6 cells
+ #this moves from log10 ul/ml/10^6 cells to just ul/ml/10^6 cells
+chemical$Clint<-10^chemical$Clint
 chemical$logPwa<--1*chemical$HL #this gets the water octanal coeff
 #Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
 chemical$Flag <-""
@@ -153,10 +159,10 @@ chemical$fu[chemical$fu<=1e-10]<-1e-5
 
 # 1C modeling
 If modelType given by the user is "1C"
-This will run a simple, 1 compartment model. In this model the concenctration at steady state is determined vs the maximum concentration from the other models.
+This will run a simple, 1 compartment model. In this model the C steady state is determined vs the C max from the other models.
 
-## calculating the EADs
-the 1C model has a monte carlo simulation that calculates the Css at the 50th and the 95th percentile.
+## Calculating the EADs
+The 1C model has a monte carlo simulation that calculates the Css at the 50th and the 95th percentile
 The first step is generating the CSS object with the call to "steadState". 
 
 ```{r}
@@ -198,18 +204,19 @@ if(modelType == "1C"){
   xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE) 
 
   #To view the results, the "EADboxplot" function plots the values. 
-  EADplot <- EADboxplot(EAD.out = outputData,label="EAD", species = species, route = route, modelType = modelType, chemDisplay = "CASRN")
+  EADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD", EADUnit = EADUnit, species = species, route = route, modelType = modelType, chemDisplay = chemDisplay, axis.text=4)
+  #Arguments for EADplot functions include "EAD.out, invivo, label, chemDisplay, EADUnit, modelType, species, route, date, doses.per.day, wth, axis.text, title.text, shape.size, dpi" 
   EADplot
   }
 ```
 
 
 # PBPK models
-If modelType given by the user is a PBPK model: "solve_3comp", "solve_pbtk", or "Solve_gas_pbpk".
+This code is used if modelType given by the user is a PBPK model: "solve_3comp", "solve_pbtk", or "Solve_gas_pbpk".
 This is wrapper code to format the inputs and parameters needed to run the models specified by the httk package.
 In addition, the output is formatted so that it matches the 1C model. This allows easy comparison between the different files for subsequent processing.
 
-## Parameter processing for the PBPK models
+## Parameter processing for the pbpk models
 The httk package needs some additional parameters including the correct capitalization of the species and ensuring that the adding of the user-specified data to the chem table is properly integrated.
 ```{r}
 #library(httk)
@@ -234,11 +241,11 @@ if(route != "iv"){
   iv.dose = FALSE
 }else{iv.dose =TRUE}
 
-dpd<-24/interv #calculating the doses per day
+dpd <- 24/interv #calculating the doses per day
 ```
 
 ## solve_3comp model
-The [solve_3comp](https://rdrr.io/cran/httk/man/solve_3comp.html) model is a 3 compartment model that has the gut, gut lumen, liver, and rest of the body compartments with the plasma equivalent to the liver plasma concentrations.
+The [solve_3comp](https://rdrr.io/cran/httk/man/solve_3comp.html) model is a 3 compartment model that has the gut,gut lumen, liver, and rest of the body compartments with the plasma equivalent to the liver plasma concentrations.
 
 ```{r solve3c}
 if(modelType == "solve_3comp"){
@@ -253,7 +260,7 @@ if(modelType == "solve_3comp"){
 ```
  
 ## solve_pbtk model
-The [solve_pbtk](https://rdrr.io/cran/httk/man/solve_pbtk.html) model is a PBPK model that has gut lumen, gut, liver, kidneys, veins, arteries, lungs, and the rest of the body compartments.
+the [solve_pbtk](https://rdrr.io/cran/httk/man/solve_pbtk.html) model is a PBPK model that has tgutlumen, gut, liver, kidneys, veins, arteries, lungs, and the rest of the body compartments.
 
 ```{r solveptpk} 
 if(modelType == "solve_pbtk"){
@@ -287,30 +294,30 @@ if(modelType == "solve_pbtk"){
 }
 ```
 ## solve_gas_pbtk model
-The [solve_gas_pbtk](https://rdrr.io/cran/httk/man/solve_gas_pbtk.html) is a PBPK model similar to the "solve_pbtk" model but is uses an inhalation route of exposure assuming the chemical is volatile (gas). As a result, it has some additional checks to see if the assumption of gas exposure is reasonable but will still proceed with a flag warning. It also includes 2 different dosing approaches, a concentration over time (expConc) or a single dose (expDose).
+The [solve_gas_pbtk](https://rdrr.io/cran/httk/man/solve_gas_pbtk.html) is a PBPK model similar to the "solve_pbtk" model but is uses an inhalation route of exposure assuming the chemical is volitle (gas). As a result, it has some addtional checks to see if the assumption of gas exposure is reasonable but will still proceed with a flag warning. It also includes 2 different dosing approaches, a concentration over time (expConc) or a single dose (expDose)
   
 ```{r}
 if(modelType == "solve_gas_pbtk"){
   gasDosing == "expConc" #ensure gas dosing is set to expConc
   #check the assumption of volitility
-  chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag!=""]<-"Fu is zero,likely due to rounding. Setting to 1e-5; 
-        Chemical likely nonvolatile, consider appropriateness of model"
-  chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag==""]<-"Chemical likely nonvolatile, consider appropriateness of model"
+  chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag!=""] <-"Fu is zero,likely due to rounding. Setting to 1e-5;
+  Chemical likely nonvolatile, consider appropriateness of model"
+  chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag==""] <-"Chemical likely nonvolatile, consider appropriateness of model"
 
   cmaxall <- NULL
 # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   for(this.cas in chemical[,"CASRN"]) {
   
-    # --- expDose option has currently been dissabled due to a bug in the httk package ---
+    # --- expDose option has currently been disabled due to a bug in the httk package ---
     # if(modelType=="solve_gas_pbtk" & gasDosing == "expDose"){
     #   ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for Solve_gas_pbtk model
-    #   concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=expPeriod, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
+    #   concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
     # }
     
     if(modelType == "solve_gas_pbtk"& gasDosing == "expConc"){
-      ConcentrationUnit <- "uM"  # output unit only has one option 
-                                 # of "uM" for Solve_gas_pbtk model
-      concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = 0, exp.conc = expConc, period=expPeriod, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
+      # output unit only has one option of "uM" for Solve_gas_pbtk model
+      ConcentrationUnit <- "uM"  
+      concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = 0, exp.conc = expConc, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
     }
     cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
     cmaxall <- rbind(cmaxall,cmax_temp)
@@ -318,11 +325,12 @@ if(modelType == "solve_gas_pbtk"){
 }  
 ```
 ## Calc EAD from PBPK
-The PBPK models currently give estimates based on the median (50%ile) of the population. As such there is minor formatting that needs to be done to generate the EAD predictions and make the output file.
+The PBPK models currently give estimates based on the median (50%ile) of the population. As such there is minor formatting that needs to be done to generate the EAD predictions and make the output file
 ```{r}
 if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_gas_pbtk"){
-  cmaxall$concMax <- as.numeric(cmaxall$concMax) #they are bound as characters 
-                                                 #so converting to numeric
+  cmaxall$concMax <- as.numeric(cmaxall$concMax) 
+  #they are bound as characters so converting to numeric
+
   Cmax <- merge(chemical, cmaxall, by.x="CASRN", by.y="this.cas")
   names(Cmax) <- gsub("concMax", "Cmax", names(Cmax) )
   #Calculating the EADs
@@ -353,7 +361,8 @@ if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_
   #Note that if the gas model is used EADUnit needs to be changed to "uM"
 
   #plotting
-  EADplot <- EADboxplot(EAD.out = outputData,label="EAD", EADUnit="mg/kg/dose", species = species, route = route, modelType = modelType, chemDisplay = "CASRN")
+  EADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD", EADUnit = EADUnit, species = species, route = route, modelType = modelType, doses.per.day = dpd, chemDisplay = chemDisplay, axis.text=4) 
+  #Arguments for EADplot functions include "EAD.out, invivo, label, chemDisplay, EADUnit, modelType, species, route, date, doses.per.day, wth, axis.text, title.text, shape.size, dpi"
   EADplot
 }
 ```

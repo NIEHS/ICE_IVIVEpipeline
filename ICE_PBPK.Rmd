@@ -1,10 +1,10 @@
 ---
 title: "ICE PBPK workflow"
-Date: 03/17/2021
-Note: Used ICE 3.3 and higher;relies on httk 2.0.2
+Date: 04/05/2021
+Note: Used ICE 3.3 and higher; relies on httk 2.0.2
 output:
-  html_document: NULL
   pdf_document: default
+  #html_document: NULL
 always_allow_html: yes
 Author: ILS (comptox@ils-inc.com)
 ---
@@ -17,7 +17,7 @@ rm(list = ls())
 ```{r setup, include=FALSE}
 library(knitr)
 opts_chunk$set(warning=FALSE, message=FALSE)
-opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE)
 ```
 
 
@@ -96,8 +96,8 @@ route <- "oral" # "oral", "iv", or "gas" needed for PBPK models.
                 # "Solve_gas_pbtk" uses the inhalation (gas) route 
 interv <- 24 #dosing interval, hours
 ndays <- 3 #number of days dosing is done
-expPeriod<-24 #length of time between exposures, hours
-expDose <- 1 #current calcualtions assume 1mg/kg/dose
+#expPeriod<-24 #length of time between exposures, hours
+expDose <- 1 #current calculations assume 1mg/kg/dose
 ConcentrationUnit <- "uM" #this is not available on the UI currently, 
                           #options are uM and mg/L
 ```
@@ -250,13 +250,12 @@ if(modelType == "solve_gas_pbtk"){
       # --- expDose option has currently been dissabled due to a bug in the httk package ---
       # if(gasDosing == "expDose"){
       #   ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for Solve_gas_pbtk model
-      #  concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=expPeriod, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
+      #  concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
       # }
     
     if(gasDosing == "expConc"){
-      # output unit only has one option of "uM" for Solve_gas_pbtk model
-      ConcentrationUnit <- "uM"  
-      concs <- solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = 0, exp.conc = expConc, period=expPeriod, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,c(1:10,17)]
+      ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for Solve_gas_pbtk model
+      concs <- solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = 0, exp.conc = expConc, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,c(1:10,17)]
     }
     #steady state concentration
     CSS0 <- calc_analytic_css(chem.cas = this.cas, parameters = NULL, daily.dose = expDose*dpd, doses.per.day = dpd, species = species_1, model = 'pbtk', output.units = ConcentrationUnit)
@@ -291,9 +290,9 @@ colnames(output_table)[8:ncol(output_table)] <- paste('t', 1:length(output_time.
 param_table<-chemical
 param_table$Species <-species; param_table$Model <-modelType; 
 if(route =="gas" & gasDosing =="expConc"){
-  param_table$"Exposure Concentration,uM/L"<-expConc #for if inhalation
+  param_table$"Exposure Concentration,uM"<-expConc #for if inhalation
   param_table$"Exposure Length, hr"<-expLength #for if inhalation
-  param_table$"Exposure Period, hr"<-expPeriod #for if inhalation
+  param_table$"Exposure Period, hr"<-interv #for if inhalation
 }
 
 param_table$"Dose, mg/kg"<-expDose;
@@ -302,7 +301,7 @@ param_table$"Dose Interval, hrs" <- interv
 param_table$"Length of Dosing, Days" <- ndays
 #reformatting columns to match the other models:
 param_table<-param_table %>% select(any_of(c("CASRN", "ChemicalName", "DTXSID", "Flag", "Species","Model",
-                               "Route","Dose, mg/kg","Exposure Concentration,uM/L","Exposure Length, hr","Exposure Period, hr" ,"Dose Interval, hrs","Length of Dosing, Days",
+                               "Route","Dose, mg/kg","Exposure Concentration,uM","Exposure Length, hr","Exposure Period, hr" ,"Dose Interval, hrs","Length of Dosing, Days",
                                "Clint","Clint Source", "fu", "fu Source", "MW", "LogP", "HL", "pka_Accept","pka_Donor","logPwa")))
 colnames(param_table)<-gsub("pka_Accept", "pka Acceptor", colnames(param_table))
 colnames(param_table)<-gsub("pka_Donor", "pka Donor", colnames(param_table))
@@ -323,16 +322,12 @@ points_plotted <- unlist(output_table[example_cas_index, 8:ncol(output_table)])
 ymax <- max(as.numeric(points_plotted))*1.1
 
 par(las=1)  
-plot(x=as.numeric(output_table[1,8:ncol(output_table)]),  #
-     y=as.numeric(output_table[example_cas_index[1],8:ncol(output_table)]),  
-     type='l', ylim=c(0,ymax), ylab = ConcentrationUnit, xlab= 'Time (h)',  
-     main=paste(modelType,'_',route, sep=''))
+plot(x=as.numeric(output_table[1,8:ncol(output_table)]), 
+     y=as.numeric(output_table[example_cas_index[1],8:ncol(output_table)]), type='l', ylim=c(0,ymax), ylab = ConcentrationUnit, xlab= 'Time (h)', main=paste(modelType,'_',route, sep=''))
 for(i in 2:length(example_cas_index)){
-  lines(x=as.numeric(output_table[1,8:ncol(output_table)]), 
-        y=as.numeric(output_table[example_cas_index[i],8:ncol(output_table)]), col=i) 
+  lines(x=as.numeric(output_table[1,8:ncol(output_table)]), y=as.numeric(output_table[example_cas_index[i],8:ncol(output_table)]), col=i)
 }
-legend('topright', legend = output_table$compartment[example_cas_index], 
-       lty=1, col=c(1:length(example_cas_index)))
+legend('topright', legend = output_table$compartment[example_cas_index], lty=1, col=c(1:length(example_cas_index)))
 
 
 ```
