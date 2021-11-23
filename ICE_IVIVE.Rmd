@@ -1,10 +1,10 @@
 ---
 title: "ICE IVIVE workflow"
-Date: 11/05/2020 lasted modified on 04/05/2021 to correct gas repeat dosing by Xiaoqing Chang
-Note: Used ICE 3.3 and higher;relies on httk 2.0.2
+Date: 09/24/2021
+Note: Used ICE 3.4 and higher;relies on httk 2.0.2
 output:
-  #html_document: default
-  pdf_document: default
+  html_document: default
+  #pdf_document: default
 Author: ILS (comptox@ils-inc.com)
 ---
 
@@ -147,7 +147,7 @@ colnames(chemical)<-gsub(".*pKa, Acidic.*", "pka_Donor", colnames(chemical))
 
 #Converting units for internsic clearance values
  #this moves from log10 ul/ml/10^6 cells to just ul/ml/10^6 cells
-chemical$Clint<-10^chemical$Clint
+#chemical$Clint<-10^chemical$Clint
 chemical$logPwa<--1*chemical$HL #this gets the water octanal coeff
 #Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
 chemical$Flag <-""
@@ -271,27 +271,28 @@ if(modelType == "solve_pbtk"){
     if(route == "oral"){
       concMax <- max(solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays,tsteps = 4, dose=0, daily.dose = expDose*dpd,iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
     }else if(route =="iv"){
-      concs <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays,tsteps = 4, dose=0, daily.dose = expDose*dpd,iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma']
-        #ignore computational errors associated with the solver
-        to_ignore <- 2 #<- time point 2 will always be anomalous
-        n_to_ignore <- max(1,floor((24*ndays)/interv))
-        if((24/interv) == 1){
-          steps_between_doses <- 97
-        }else if(24/interv > 1){
-          steps_between_doses <- floor(97 / (24/interv))+1
-        }else if(24/interv < 1){
-          steps_between_doses <- floor(97 / (24/interv))
-        }
-        for(i in 1:n_to_ignore){
-          to_ignore[i+1] = to_ignore[i] + steps_between_doses
-        }
-        concMax <- max(concs[-to_ignore])
+      concs <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays,tsteps = 4, dose=0, daily.dose = expDose*dpd,iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
+      #store output
+      trim_output <- as.data.frame(output0)
+      
+      #ignore computational errors
+      to_ignore <- 2 #<- time point 2 will always be anomalous
+      n_to_ignore <- max(1,floor((24*ndays)/interv))
+      if((24/interv) == 1){
+        steps_between_doses <- 97
+      }else if(24/interv > 1){
+        steps_between_doses <- floor(97 / (24/interv))+1
+      }else if(24/interv < 1){
+        steps_between_doses <- floor(97 / (24/interv))
+      }
+      for(i in 1:n_to_ignore){
+        to_ignore[i+1] = to_ignore[i] + steps_between_doses
+      }
+      trim_output <- trim_output[-to_ignore,]
+      concMax <-max(trim_output[,'Cplasma'])
     }
-    
-  cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
-  cmaxall <- rbind(cmaxall,cmax_temp)
   }
-}
+  }
 ```
 ## solve_gas_pbtk model
 The [solve_gas_pbtk](https://rdrr.io/cran/httk/man/solve_gas_pbtk.html) is a PBPK model similar to the "solve_pbtk" model but is uses an inhalation route of exposure assuming the chemical is volitle (gas). As a result, it has some addtional checks to see if the assumption of gas exposure is reasonable but will still proceed with a flag warning. It also includes 2 different dosing approaches, a concentration over time (expConc) or a single dose (expDose)
