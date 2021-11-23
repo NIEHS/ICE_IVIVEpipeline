@@ -1,10 +1,10 @@
 ---
 title: "ICE PBPK workflow"
-Date: 04/05/2021
-Note: Used ICE 3.3 and higher; relies on httk 2.0.2
+Date: 09/24/2021
+Note: Used ICE 3.4 and higher; relies on httk 2.0.2
 output:
-  pdf_document: default
-  #html_document: NULL
+  #pdf_document: default
+  html_document: NULL
 always_allow_html: yes
 Author: ILS (comptox@ils-inc.com)
 ---
@@ -85,15 +85,14 @@ Details about what model, route, and dose need to be specified.
 Currently, species in ICE is limited to human or rat. Using this notebook one can expand the species with minor editing of the code, provided the parameters are available. 
 ```{r}
 species <- "human" # "human" or "rat"
-modelType <-  "solve_pbtk" # "solve_pbtk" or "solve_gas_pbtk"
+modelType <-  "solve_gas_pbtk" # "solve_pbtk" or "solve_gas_pbtk"
 ```
 
 For the PBPK models some additional parameters can be modified. An inhalation exposure has additional parameters.
 The route determines where the chemical will enter the system. Exposure route, interval, and days are needed for all PBPK models. 
 
 ```{r}
-route <- "oral" # "oral", "iv", or "gas" needed for PBPK models. 
-                # "Solve_gas_pbtk" uses the inhalation (gas) route 
+route <- "gas"      # "Solve_gas_pbtk" uses the inhalation (gas) route 
 interv <- 24 #dosing interval, hours
 ndays <- 3 #number of days dosing is done
 #expPeriod<-24 #length of time between exposures, hours
@@ -147,7 +146,7 @@ colnames(chemical)<-gsub(".*pKa, Basic.*", "pka_Accept", colnames(chemical))
 colnames(chemical)<-gsub(".*pKa, Acidic.*", "pka_Donor", colnames(chemical))
 
 #Converting units for internsic clearance values
-chemical$Clint<-10^chemical$Clint #this moves from log10 ul/ml/10^6 cells 
+#chemical$Clint<-10^chemical$Clint #this moves from log10 ul/ml/10^6 cells 
                                   #to just ul/ml/10^6 cells
 chemical$logPwa<--1*chemical$HL #this gets the water octanal coeff
 #Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
