@@ -14,7 +14,7 @@ EADboxplot <- function(EAD.out, invivo = NULL, label = "EAD",chemDisplay = "CASR
   selEAD <- cbind(EAD.out$CASRN, EAD.out$ChemicalName, seldata)
   names(selEAD)[1:2] <- c("CASRN","ChemicalName")
   EAD.up <- selEAD %>% gather("Category", "EAD", 3:ncol(selEAD)) # this is to unpivot the data to make plotting easy
-
+  maxy <- max(EAD.up$EAD, na.rm=T)
 
   if (is.null(invivo))
   {
@@ -24,7 +24,7 @@ EADboxplot <- function(EAD.out, invivo = NULL, label = "EAD",chemDisplay = "CASR
       theme(axis.text.x=element_text(size=axis.text, angle =65, hjust = 1, colour="black")) +
       theme(axis.text.y=element_text(size=axis.text, angle = 0, hjust = 1, colour="black")) +
       scale_x_discrete(label = function(x) abbreviate(x, minlength=12)) +
-      scale_y_log10(paste(label," ","(", EADUnit,")",sep="","\n"), breaks=trans_breaks("log10", function(x) 10 ^ x)(c(1e-6, 1000000))) +
+      scale_y_log10(paste(label," ","(", EADUnit,")",sep="","\n"), breaks=trans_breaks("log10", function(x) 10 ^ x)(c(1e-6, maxy))) +
       theme(plot.title = element_text(hjust=0.5,size=title.text, face="bold"),legend.text = element_text(size = title.text), axis.title.x = element_text(size=title.text,angle=0,face="bold",colour="black"),
             axis.title.y = element_text(size=title.text,angle=90,face="bold",colour="black"))  +
       labs(x='Chemical')
@@ -47,7 +47,7 @@ EADboxplot <- function(EAD.out, invivo = NULL, label = "EAD",chemDisplay = "CASR
     theme(axis.text.x=element_text(size=axis.text, angle = 65, hjust = 1, colour="black")) +
     theme(axis.text.y=element_text(size=axis.text, angle = 0, hjust = 1, colour="black")) +
     scale_x_discrete(label = function(x) abbreviate(x, minlength=12)) +
-    scale_y_log10(paste(label," or in vivo level", " ","(", EADUnit,")",sep="","\n"), breaks=trans_breaks("log10", function(x) 10 ^ x)(c(1e-6, 1000000))) +
+    scale_y_log10(paste(label," or in vivo level", " ","(", EADUnit,")",sep="","\n"), breaks=trans_breaks("log10", function(x) 10 ^ x)(c(1e-6, maxy))) +
     theme(plot.title = element_text(hjust=0.5,size=title.text, face="bold"),legend.text = element_text(size = title.text), axis.title.x = element_text(size=title.text,angle=0,face="bold",colour="black"),
           axis.title.y = element_text(size=title.text,angle=90,face="bold",colour="black"))  +
     labs(x='Chemical')
