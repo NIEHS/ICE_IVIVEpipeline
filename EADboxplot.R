@@ -1,4 +1,4 @@
-EADboxplot <- function(EAD.out, invivo = NULL, label = "EAD",chemDisplay = "CASRN", EADUnit = "mg/kg/dose", modelType = "1C", species = "human", route = "iv", date = "2021", doses.per.day = 1, wth = 0.2, axis.text = 8, title.text = 10, shape.size = 1, dpi = 300)
+EADboxplot <- function(EAD.out, invivo = NULL, label = "EAD", chemDisplay = "CASRN", EADUnit = "mg/kg/dose", modelType = "1C", species = "human", route = "iv", date = "2021", doses.per.day = 1, wth = 0.2, axis.text = 8, title.text = 10, shape.size = 1, dpi = 300)
 {
   # wth -- the width of the boxplot (for plot)
   # shape.size -- the size of shape indicating in vivo data points (for plot)
