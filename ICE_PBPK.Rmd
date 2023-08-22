@@ -1,12 +1,13 @@
 ---
 title: "ICE PBPK workflow"
-Date: 09/24/2021
-Note: Used ICE 3.4 and higher; relies on httk 2.0.2
+#Date of latest update: 08/20/2023
+#Date: 03/17/2023
+Note: Used ICE 4.0 and higher; relies on httk 2.2.2
 output:
   #pdf_document: default
   html_document: NULL
 always_allow_html: yes
-Author: ILS (comptox@ils-inc.com)
+Author: Inotiv (ICE-support@niehs.nih.gov)
 ---
 
 ```{r setup1, include=FALSE}
@@ -23,7 +24,7 @@ opts_chunk$set(tidy.opts=list(width.cutoff=50),tidy=TRUE)
 
 # Description
 
-The workflow allows the flexibility to select from two different rat and human PK models from the [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk): (solve_pbtk), and (Solve_gas_pbtk). The workflow is to predict plasma and tissue concentration profiles across time following a dose of a substance. Exposure routes include oral ingestion (solve_pbtk), intrevenous (solve_pbtk), and inhalation (solve_gas_pbtk).  For inhalation exposures using the dose is provided as an air concentration. 
+The workflow allows the flexibility to select from three different rat and/or human PK models from the [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk): solve_pbtk, solve_gas_pbtk, and solve_fetal_pbtk. The workflow is to predict plasma and tissue concentration profiles across time following a dose of a substance. Exposure routes include oral ingestion (solve_pbtk, solve_fetal_pbtk), intrevenous (solve_pbtk, solve_fetal_pbtk), and inhalation (solve_gas_pbtk).  For inhalation exposures using the dose is provided as an air concentration, uM or ppmv. 
 
 An example input file is included: ChemicalData_Rnotebook.txt
 
@@ -32,9 +33,10 @@ An example input file is included: ChemicalData_Rnotebook.txt
 ```{r}
 #load libraries
 library(tidyverse)
+library(rlang)
 library(deSolve)
 library(doParallel)
-library(httk) #this is needed for models: Solve_3comp, Solve_pbtk. 
+library(httk) #this is needed for models: solve_pbtk, solve_gas_pbtk, solve_fetal_pbtk. 
               #The code is compatible with httk_2.0.2
 library(openxlsx) #for writing the excel file that is user output
 library(data.table)
@@ -47,24 +49,73 @@ library(data.table)
 #The input for this function is a list object (x) that contains an
 #entry with the pbpk outputs from the httk functions along with the
 #plasma CSS and CASRN for the chemical
-assemble.table <- function(x){
-  CASRN <- rep(x$CASRN[1], 9) #8 rows, 1 for each compartment + 1 for time
+
+## assemble.table_* function is to assemble direct outputs from different models to a format that is usable for ICE
+## Because the number of output columns are different for each model, so the assemble.table_* is modified to meet the needs for each model
+#nOutParam - total number of time column and predicted tissue concentration column in the output table
+#nStartCol - start column number, including time column
+#nStartConCol - start column number of tissue concentration , excluding time column
+#nTotalCol - number of total columns in the output table
+#assemble.table <- function(x, nOutParam=10, nStartCol=4, nStartConCol=5, nTotalCol=13){
+assemble.table_pbtk <- function(x, nOutParam=NULL, nStartCol=NULL, nStartConCol=NULL, nTotalCol=NULL){
+  CASRN <- rep(x$CASRN[1], nOutParam)                             #x is "output" data frame; 9 rows, 8 tissue compartments + 1 for time 
   compound <- rep(chem.physical_and_invitro.data[which(
-    chem.physical_and_invitro.data$CAS==x$CASRN[1]),1],9)
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),1], nOutParam) #extract the "compound" information for corresponding CAS
   dtxsid <- rep(chem.physical_and_invitro.data[which(
-    chem.physical_and_invitro.data$CAS==x$CASRN[1]),4],9)
-  Cmax <- c(NA, sapply(as.data.frame(x[4:11]), function(y) max(as.numeric(y))))
-  Unit <- rep(ConcentrationUnit, 9)
-  CSS_plasma <- rep(x$CSS_plasma[1], 9) #8 rows, 1 for each compartment + 1 for time
-  compartment <- names(x)[3:11]
-  concs <- t(x[3:11])
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),4], nOutParam) #extract the "DTXSID" information for corresponding CAS
+  half_life_h <- rep(x$half_life_h[1], nOutParam)
+  maxAUC.h <- rep(x$maxAUC.h[1], nOutParam)
+  CSS_plasma <- rep(x$CSS_plasma[1], nOutParam)                    
+  Cmax <- c(NA, sapply(as.data.frame(x[nStartConCol:nTotalCol]), function(y) max(as.numeric(y)))) #from "output_time.h" to "Cplasma"
+  Unit <- rep(ConcentrationUnit, nOutParam)
+  compartment <- names(x)[nStartCol:nTotalCol]                     #nStartCol - start column number, including time column
+  concs <- t(x[nStartCol:nTotalCol])                               #nTotalCol - number of total columns in the output table
   
-  out <- as.data.frame(cbind(CASRN, compound, dtxsid, Cmax, Unit, CSS_plasma, compartment, concs))
+  out <- as.data.frame(cbind(CASRN, compound, dtxsid, half_life_h, maxAUC.h, CSS_plasma, Cmax, Unit, compartment, concs))
   rownames(out) <- NULL
-  
   return(out)
 }
+
+assemble.table_gas <- function(x, nOutParam=NULL, nStartCol=NULL, nStartConCol=NULL, nTotalCol=NULL){
+  CASRN <- rep(x$CASRN[1], nOutParam)                             #x is "output" data frame; 9 rows, 8 tissue compartments + 1 for time 
+  compound <- rep(chem.physical_and_invitro.data[which(
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),1], nOutParam) #extract the "compound" information for corresponding CAS
+  dtxsid <- rep(chem.physical_and_invitro.data[which(
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),4], nOutParam) #extract the "DTXSID" information for corresponding CAS
+  half_life_h <- rep(x$half_life_h[1], nOutParam)
+  maxAUC.h <- rep(x$maxAUC.h[1], nOutParam)
+  #CSS_plasma <- rep(x$CSS_plasma[1], nOutParam)                      
+  Cmax <- c(NA, sapply(as.data.frame(x[nStartConCol:nTotalCol]), function(y) max(as.numeric(y)))) #from "output_time.h" to "Cplasma"
+  Unit <- rep(ConcentrationUnit, nOutParam)
+  compartment <- names(x)[nStartCol:nTotalCol]                     #nStartCol - start column number, including time columne
+  concs <- t(x[nStartCol:nTotalCol])                               #nTotalCol - number of total columns in the output table
+  
+  out <- as.data.frame(cbind(CASRN, compound, dtxsid, half_life_h, maxAUC.h, Cmax, Unit, compartment, concs))
+  rownames(out) <- NULL
+  return(out)
+}
+
+assemble.table_fetal <- function(x, nOutParam=NULL, nStartCol=NULL, nStartConCol=NULL, nTotalCol=NULL){
+  CASRN <- rep(x$CASRN[1], nOutParam)                              #x is "output" data frame; 21 rows, 10 maternal and 10 fetal tissue compartments + 1 for time 
+  compound <- rep(chem.physical_and_invitro.data[which(
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),1], nOutParam) #extract the "compound" information for corresponding CAS
+  dtxsid <- rep(chem.physical_and_invitro.data[which(
+    chem.physical_and_invitro.data$CAS==x$CASRN[1]),4], nOutParam) #extract the "DTXSID" information for corresponding CAS
+  half_life_h <- rep(x$half_life_h[1], nOutParam)
+  maxAUC.h <- rep(x$maxAUC.h[1], nOutParam)
+  maxFetalAUC.h <- rep(x$maxfAUC.h[1], nOutParam)                    
+  Cmax <- c(NA, sapply(as.data.frame(x[nStartConCol:nTotalCol]), function(y) max(as.numeric(y)))) #from "output_time.h" to "Cplasma"
+  Unit <- rep(ConcentrationUnit, nOutParam)
+  compartment <- names(x)[nStartCol:nTotalCol]                     #nStartCol - start column number, including time column
+  concs <- t(x[nStartCol:nTotalCol])                               #nTotalCol - number of total columns in the output table
+  
+  out <- as.data.frame(cbind(CASRN, compound, dtxsid, half_life_h, maxAUC.h, maxFetalAUC.h, Cmax, Unit, compartment, concs))
+  rownames(out) <- NULL
+  return(out)
+}
+
 ```
+
 # Input data and output file path
 There are several input variables needed to run the code. Some variables are model specific, as detailed.
 Adjust the file paths to point to the file in your directory.
@@ -72,33 +123,34 @@ Adjust the file paths to point to the file in your directory.
 chemFile: The file containing chemical data from ICE. this has the CASRN as the first field
 
 ```{r}
-chemFile <- "ChemicalData_Rnotebook.txt" # chemicals data from ICE, 
-                                         #include CASRN field as identifier
-Userout <- "User_Results.xlsx" # file name (and path) for the output 
-                               #file for the tissue concentrations
-output_image <-"User_plot.pdf" #the file for the plot of the results
+chemFile <- "ChemicalData_Rnotebook.txt"   # chemicals data from ICE, include CASRN field as identifier
+Userout <- "User_Results.xlsx"                    # file name (and path) for the output 
+                                                  # file for the tissue concentrations
+output_image <-"User_plot.pdf"                    # the file for the plot of the results
 ```
+
 # Model variables
 Details about what model, route, and dose need to be specified.
 
 ## What model?
 Currently, species in ICE is limited to human or rat. Using this notebook one can expand the species with minor editing of the code, provided the parameters are available. 
+
 ```{r}
-species <- "human" # "human" or "rat"
-modelType <-  "solve_gas_pbtk" # "solve_pbtk" or "solve_gas_pbtk"
+species <- "human"                                # "human" or "rat", the solve_fetal_pbtk model is only for human
+modelType <-  "solve_fetal_pbtk"                    # "solve_pbtk", "solve_fetal_pbtk", or "solve_gas_pbtk"
 ```
 
 For the PBPK models some additional parameters can be modified. An inhalation exposure has additional parameters.
 The route determines where the chemical will enter the system. Exposure route, interval, and days are needed for all PBPK models. 
 
 ```{r}
-route <- "gas"      # "Solve_gas_pbtk" uses the inhalation (gas) route 
-interv <- 24 #dosing interval, hours
-ndays <- 3 #number of days dosing is done
-#expPeriod<-24 #length of time between exposures, hours
-expDose <- 1 #current calculations assume 1mg/kg/dose
-ConcentrationUnit <- "uM" #this is not available on the UI currently, 
-                          #options are uM and mg/L
+route <- "iv"      # options are "inhalation", "iv","oral"; "solve_gas_pbtk" uses the inhalation (gas) route,
+bWeight <- 70 # unit is kg;the body weight of simulated subject, default is 70 for human, and 0.25 for rat
+interv <- 24  # dosing interval, hours
+ndays <- 3    # number of days dosing is done
+expDose <- 1  # current calculations assume 1mg/kg/dose for solve_pbtk, solve_fetal_pbtk model
+expConc <- 1
+ConcentrationUnit <- "uM" # options are uM and mg/L
 ```
 
 ## Inhalation specific parameters
@@ -112,7 +164,15 @@ gasDosing <-"expConc" # "expConc" or "expDose"
 if(gasDosing =="expConc" & (!exists("expConc") || is.null(expConc))){
   expConc <- 1 #current calcualtions assume 1mg/kg/dose
 }
+gasInputUnit <- "uM" # Input concentration unit for gas model (httkv2.1.0 and later), "uM" or "ppmv" (default)
 expLength <- 0.25 #length of the gas exposure, hours
+```
+
+## Gestation model (solve_fetal_pbtk) specific parameters
+
+```{r}
+gestationDays <- 91 #gestational days when dose starts, range is 91 days (14 weeks) -  280 days (40 weeks); At 360, some chemical starts to have less columns 
+ 
 ```
 
 # Load data
@@ -121,7 +181,7 @@ Notice that the chemical input has the source of the FU and Clint data. ICE now 
 ```{r}
 chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) #there are single quotes 
                       #in chemical names that need to be addressed, tidyR handles this well
-chemical[1:2,]
+chemical[1:2,]        #to check the format of inptut data
 ```
 
 # Preparing data
@@ -130,7 +190,7 @@ Partitioning coefficients are obtained by internal function from the httk packag
 Note that a few checks are done - these will generate flags that can be used to follow up as needed.
 
 ```{r}
-##  column names should be labeled correctly. RegEx have been used to help, see the example file
+##column names should be labeled correctly. RegEx have been used to help, see the example file
 
 #cleaning the names for taking from an ICE Query-stricter matching is used to handel including the ADME source information
 colnames(chemical)<-gsub(".*Name.*", "ChemicalName", colnames(chemical))
@@ -147,21 +207,28 @@ colnames(chemical)<-gsub(".*pKa, Acidic.*", "pka_Donor", colnames(chemical))
 
 #Converting units for internsic clearance values
 #chemical$Clint<-10^chemical$Clint #this moves from log10 ul/ml/10^6 cells 
-                                  #to just ul/ml/10^6 cells
-chemical$logPwa<--1*chemical$HL #this gets the water octanal coeff
+                                   #to just ul/ml/10^6 cells
+chemical$logPwa<--1*chemical$HL    #this gets the water octanal coeff
 #Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
 chemical$Flag <-""
 #catch for low Fu
 chemical$Flag[chemical$fu<=1e-10]<-"Fu is zero,likely due to rounding. Setting to 1e-5"
 chemical$fu[chemical$fu<=1e-10]<-1e-5
+
+#setting up additional defaults:
+if(!exists("expDose") || is.null(expDose)){
+  expDose <- 1                    #current calculations assume 1mg/kg/dose
+}
+
 ```
 
 # PBPK models
-Currently, the PBPK analysis in ICE supports the "solve_pbtk" and "Solve_gas_pbpk" model types.
+Currently, the PBPK analysis in ICE supports the "solve_pbtk", "solve_gas_pbpk" and "solve_fetal_pbtk" model types.
 This is wrapper code to format the inputs and parameters needed to run the models specified by the httk package.
 
 ## Parameter processing for the PBPK models
 The httk package needs some additional parameters including the correct capitalization of the species and ensuring that the adding of the user-specified data to the chem table is properly integrated.
+
 ```{r}
 #library(httk)
 ##preprocessing variables:
@@ -181,27 +248,45 @@ if(species_1=="Human"){
   chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu",  pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW", logHenry="HL"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
   chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu"), species = "Human", reference = paste0(species_1, "ICE"), overwrite = T) #addresses bug issues where look up from human bc assume no rat
 }
+
 if(route != "iv"){
   iv.dose = FALSE
 }else{iv.dose =TRUE}
 
 dpd<-24/interv #calculating the doses per day
+
+```
+
+# to allow the user to change the bodyweight for rat and human
+
+```{r}
+if(species_1=="Human"){
+  physiology.data[4,6] <- bWeight
+}else{
+  physiology.data[2,6] <- bWeight
+}
 ```
 
 ## solve_pbtk model
 The [solve_pbtk](https://rdrr.io/cran/httk/man/solve_pbtk.html) model is a PBPK model that has gut lumen, gut, liver, kidneys, veins, arteries, lungs, and the rest of the body compartments.
 
-```{r solveptpk, results="hide"} 
+```{r solvepbtk, results="hide"} 
 if(modelType == "solve_pbtk"){
   # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   output_list <- list()
-  count=1
+  count=0
   for(this.cas in chemical[,"CASRN"]) {
-    if(route == "oral"){
-      concs <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays,tsteps = 4, dose=0, daily.dose = expDose*dpd,iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,c(1:10,13)]
-    }else if(route =="iv"){
-      concs <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays,tsteps = 4, dose=0, daily.dose = expDose*dpd,iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,c(1:10,13)]
-        #ignore computational errors associated with the solver
+    half_life <- calc_half_life(chem.cas = this.cas, species = species_1)
+    param <- parameterize_pbtk(chem.cas = this.cas, species = species_1, default.to.human = TRUE)
+    print(param$BW)  # to make sure that the body weight had been changed.
+    
+    output0 <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
+    output0 <- as.data.frame(output0)
+    maxAUC.h <- max(output0$AUC)*24
+    concs <- output0 %>% select(c("time", "Cgut", "Cliver", "Cven", "Clung", "Cart", "Crest", "Ckidney", "Cplasma"))
+
+    if(route =="iv"){
+      #ignore computational errors associated with the solver
         to_ignore <- 2 #<- time point 2 will always be anomalous
         n_to_ignore <- max(1,floor((24*ndays)/interv))
         if((24/interv) == 1){
@@ -218,15 +303,21 @@ if(modelType == "solve_pbtk"){
     }
     
     #steady state concentration
-    CSS0 <- calc_analytic_css(chem.cas = this.cas, parameters = NULL, daily.dose = expDose*dpd, doses.per.day = dpd, species = species_1, model = 'pbtk', output.units = ConcentrationUnit)
+    CSS0 <- calc_analytic_css(chem.cas = this.cas, parameters = NULL, daily.dose = expDose*dpd, doses.per.day = dpd, route=route, species = species_1, model = 'pbtk', output.units = ConcentrationUnit)
     
     #convert units and store output
     output_time.h <- sapply(concs[,1], function(x) x*24) #days to hours
-    output_vals <- concs[,3:11]
-    output <- as.data.frame(cbind('CASRN'=rep(this.cas, length(output_time.h)), 'CSS_plasma'=rep(CSS0, length(output_time.h)), output_time.h, output_vals))
+    output_vals <- concs %>% select(c("Cgut", "Cliver", "Cven", "Clung", "Cart", "Crest", "Ckidney", "Cplasma"))
+    output <- as.data.frame(cbind('CASRN'=rep(this.cas, length(output_time.h)),
+                                  'half_life_h' = rep(half_life, length(output_time.h)),
+                                  'maxAUC.h' = rep(maxAUC.h, length(output_time.h)),
+                                  'CSS_plasma'=rep(CSS0, length(output_time.h)),
+                                  output_time.h, 
+                                  output_vals))
 
-    output_list[[count]] <- as.data.frame(output)
-    count <- count+1
+     count <- count+1
+     output_list[[count]] <- as.data.frame(output)
+   
   }
 }
 ```
@@ -236,38 +327,104 @@ The [solve_gas_pbtk](https://rdrr.io/cran/httk/man/solve_gas_pbtk.html) is a PBP
 
 ```{r}
 if(modelType == "solve_gas_pbtk"){
-  #check the assumption of volitility
+  #check the assumption of volatility
   chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag!=""]<-"Fu is zero,likely due to rounding. Setting to 1e-5; 
             Chemical likely nonvolatile, consider appropriateness of model"
   chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag==""]<-"Chemical likely nonvolatile, consider appropriateness of model"
 
   # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   output_list <- list()
-  count=1
+  count=0
   for(this.cas in chemical[,"CASRN"]) {
   
       # --- expDose option has currently been dissabled due to a bug in the httk package ---
       # if(gasDosing == "expDose"){
-      #   ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for Solve_gas_pbtk model
+      #   ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for solve_gas_pbtk model
       #  concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
       # }
-    
+    half_life <- calc_half_life(chem.cas = this.cas, species = species_1)
     if(gasDosing == "expConc"){
-      ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for Solve_gas_pbtk model
-      concs <- solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = 0, exp.conc = expConc, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,c(1:10,17)]
+      output0 <- solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = NULL, days = ndays, tsteps = 4, dose=NULL, daily.dose = NULL, exp.conc = expConc, period=interv, input.units = gasInputUnit, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
+      output0 <- as.data.frame(output0)
+      maxAUC.h <- max(output0$AUC)*24
+      concs <- output0 %>% select(c("time", "Cgut", "Cliver", "Cven", "Clung", "Cart", "Crest", "Ckidney", "Cplasma"))       
     }
     #steady state concentration
-    CSS0 <- calc_analytic_css(chem.cas = this.cas, parameters = NULL, daily.dose = expDose*dpd, doses.per.day = dpd, species = species_1, model = 'pbtk', output.units = ConcentrationUnit)
+    #CSS0 <- calc_analytic_css(chem.cas = this.cas, parameters = NULL, daily.dose = expDose*dpd, doses.per.day = dpd, species = species_1, model = 'pbtk', output.units = ConcentrationUnit)
     
     #convert units and store output
     output_time.h <- sapply(concs[,1], function(x) x*24) #days to hours
-    output_vals <- concs[,3:11]
-    output <- as.data.frame(cbind('CASRN'=rep(this.cas, length(output_time.h)), 'CSS_plasma'=rep(CSS0, length(output_time.h)), output_time.h, output_vals))
+    output_vals <- concs %>% select(c("Cgut", "Cliver", "Cven", "Clung", "Cart", "Crest", "Ckidney", "Cplasma"))
+    output <- as.data.frame(cbind('CASRN'=rep(this.cas, length(output_time.h)),
+                                  'half_life_h' = rep(half_life, length(output_time.h)),
+                                  'maxAUC.h' = rep(maxAUC.h, length(output_time.h)),
+                                  #'CSS_plasma'=rep(CSS0, length(output_time.h)), 
+                                  output_time.h, 
+                                  output_vals))
 
-    output_list[[count]] <- as.data.frame(output)
-    count <- count+1
+     count <- count+1
+     output_list[[count]] <- as.data.frame(output)
+   
   }
 }  
+```
+
+## solve_fetal_pbtk model
+The [solve_fetal_pbtk](https://rdrr.io/cran/httk/man/solve_fetal_pbtk.html) is a human PBPK model that includes both maternal and fetal compartments and a placenta modeled as a joint organ shared by mother and fetus. It simulated gestation day of 91-280 days. A flag warning will show if the gestation day is out of this range. The exposure routes for this model are oral and IV.
+
+```{r solvefpbtk, results="hide"} 
+if(modelType == "solve_fetal_pbtk"){
+  # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
+  if(species_1 == "Rat"){
+      stop("Gestation model is for human only")
+  }  
+  if(gestationDays < 91 || gestationDays > 280) {
+    print("Warning: the gestation day is the day when dosing starts, which shall be within the range of 91-280 days")
+  }
+    
+  output_list <- list()
+  count=0
+  for(this.cas in chemical[,"CASRN"]) {
+    half_life <- calc_half_life(chem.cas = this.cas, species = species_1)
+    output_f <- solve_fetal_pbtk(chem.cas = this.cas, times=seq(gestationDays,gestationDays+ndays,0.025), doses.per.day = dpd, dose= NULL, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, 
+                                 species = "human", default.to.human = TRUE, plots = FALSE, suppress.messages = TRUE) 
+    output0 <- as.data.frame(output_f)
+    maxAUC.h <- max(output0$AUC)*24    #convert days to hours
+    maxfAUC.h <- max(output0$fAUC)*24  #convert days to hours
+    concs <- output0 %>% select(c("time", "Cgut", "Cliver", "Cven", "Clung", "Cart", "Cadipose", "Crest", "Ckidney", "Cplasma", "Cplacenta", "Cfliver", "Cfven", "Cfart", "Cfgut", "Cflung", "Cfrest", "Cfthyroid", "Cfkidney", "Cfbrain", "Cfplasma"))
+
+  
+    if(route =="iv"){
+        #ignore computational errors associated with the solver
+        to_ignore <- 2 #<- time point 2 will always be anomalous
+        n_to_ignore <- max(1,floor((24*ndays)/interv))
+        if((24/interv) == 1){
+          steps_between_doses <- 41
+        }else if(24/interv > 1){
+          steps_between_doses <- floor(41 / (24/interv))+1
+        }else if(24/interv < 1){
+          steps_between_doses <- floor(41 / (24/interv))
+        }
+        for(i in 1:n_to_ignore){
+          to_ignore[i+1] = to_ignore[i] + steps_between_doses
+        }
+        concs <- concs[-to_ignore,]
+    }
+    
+    #convert units and store output
+    output_time.h <- sapply(concs[,1], function(x) x*24) #days to hours
+    output_vals <- concs %>% select(c("Cgut", "Cliver", "Cven", "Clung", "Cart", "Cadipose", "Crest", "Ckidney", "Cplasma", "Cplacenta", "Cfliver", "Cfven", "Cfart", "Cfgut", "Cflung", "Cfrest", "Cfthyroid", "Cfkidney", "Cfbrain", "Cfplasma"))
+    output <- as.data.frame(cbind('CASRN'=rep(this.cas, length(output_time.h)), 
+                                  'half_life_h' = rep(half_life, length(output_time.h)),
+                                  'maxAUC.h' = rep(maxAUC.h, length(output_time.h)),
+                                  'maxfAUC.h' = rep(maxfAUC.h, length(output_time.h)),
+                                  output_time.h, 
+                                  output_vals))
+
+    count <- count+1
+    output_list[[count]] <- as.data.frame(output)
+  }
+}
 ```
 
 # Save output files
@@ -275,37 +432,76 @@ if(modelType == "solve_gas_pbtk"){
 An Excel output file will be created with two tabs, 1 for the PBPK parameters and one for the analysis output.
 ```{r}
 #build output table
-formatted_list <- lapply(output_list, assemble.table)
-output_table <- rbindlist(formatted_list)
+#formatted_list <- lapply(output_list, assemble.table)
+names(output_list) <- chemical[,"CASRN"] # <- chemical[,"CASRN"][1] for testing just one CASRN
 
-#trim redundant time rows
-to_remove <- which(output_table$compartment == 'output_time.h')[-1]
-output_table <- output_table[-to_remove]
-output_table[1,c(1:6)] <- NA
-
-colnames(output_table)[8:ncol(output_table)] <- paste('t', 1:length(output_time.h))
-
-#preparing the chemical parameter file for writing. This will have the modeling conditions
-param_table<-chemical
-param_table$Species <-species; param_table$Model <-modelType; 
-if(route =="gas" & gasDosing =="expConc"){
-  param_table$"Exposure Concentration,uM"<-expConc #for if inhalation
-  param_table$"Exposure Length, hr"<-expLength #for if inhalation
-  param_table$"Exposure Period, hr"<-interv #for if inhalation
+if(modelType == "solve_pbtk"){
+  formatted_list <- lapply(output_list, function(x) assemble.table_pbtk(x, nOutParam=9, nStartCol=5, nStartConCol=6, nTotalCol=13))
+} 
+if(modelType == "solve_gas_pbtk"){
+  formatted_list <- lapply(output_list, function(x) assemble.table_gas(x, nOutParam=9, nStartCol=4, nStartConCol=5, nTotalCol=12))
+}
+if(modelType == "solve_fetal_pbtk"){
+  formatted_list <- lapply(output_list, function(x) assemble.table_fetal(x, nOutParam=21, nStartCol=5, nStartConCol=6, nTotalCol=25))
 }
 
+#for single chemical
+if(length(chemical[,"CASRN"]) == 1){
+  output_table <- formatted_list[[1]]
+}
+
+#for multiple chemicals
+if(length(chemical[,"CASRN"]) > 1 && modelType != "solve_gas_pbtk"){
+  #output_table <- rbindlist(formatted_list)  
+  output_table <- rbindlist(formatted_list, fill=TRUE) #to fill missing columns use fill=TRUE
+  #trim redundant time rows
+  to_remove <- which(output_table$compartment == 'output_time.h')[-1]
+  output_table <- output_table[-to_remove]
+  output_table[1,c(1:8)] <- NA  
+  #for solve_pbtk model, removed values for the 1st row for columns before "compartment", which are "CASRN, compound, dtxsid, half_life_h, maxAUC.h, CSS_plasma, Cmax, Unit"
+  #for solve_fetal_pbtk model,removed values for the 1st row for columns before "compartment", which are "CASRN, compound, dtxsid, half_life_h, maxAUC.h, maxFetalAUC.h, Cmax, Unit"
+  colnames(output_table)[10:ncol(output_table)] <- paste('t', 1:length(output_time.h)) #"10" is where the time starts
+}
+
+if(length(chemical[,"CASRN"])> 1 && modelType == "solve_gas_pbtk"){
+    #output_table <- rbindlist(formatted_list)
+    output_table <- rbindlist(formatted_list, fill=TRUE) #to fill missing columns use fill=TRUE
+    to_remove <- which(output_table$compartment == 'output_time.h')[-1]#trim redundant time rows
+    output_table <- output_table[-to_remove]
+    output_table[1,c(1:7)] <- NA  
+    #removed values for the 1st row for columns before "compartment", which are "CASRN, compound, dtxsid, half_life_h, maxAUC.h, CSS_plasma, Cmax, Unit"
+    colnames(output_table)[9:ncol(output_table)] <- paste('t', 1:length(output_time.h)) #"9" is where the time starts
+}
+```
+
+# Preparing the chemical parameter file for writing. This will have the modeling conditions
+
+```{r}
+param_table<-chemical
+param_table$Species <-species; param_table$Model <-modelType; 
 param_table$"Dose, mg/kg"<-expDose;
+if(route =="gas" & gasDosing =="expConc"){
+  param_table$"Exposure Concentration"<-expConc            #for if inhalation
+  param_table$"Exposure Concentration Unit"<-gasInputUnit  #for if inhalation
+  param_table$"Exposure Length, hr"<-expLength     #for if gas
+  param_table$"Exposure Period, hr"<-interv        #for if gas
+  param_table<- param_table[, setdiff(colnames(param_table), c("Dose, mg/kg"))]
+}
+
 param_table$Route <- route
 param_table$"Dose Interval, hrs" <- interv
 param_table$"Length of Dosing, Days" <- ndays
 #reformatting columns to match the other models:
 param_table<-param_table %>% select(any_of(c("CASRN", "ChemicalName", "DTXSID", "Flag", "Species","Model",
-                               "Route","Dose, mg/kg","Exposure Concentration,uM","Exposure Length, hr","Exposure Period, hr" ,"Dose Interval, hrs","Length of Dosing, Days",
+                               "Route","Dose, mg/kg","Exposure Concentration","Exposure Concentration Unit","Exposure Length, hr","Exposure Period, hr" ,"Dose Interval, hrs","Length of Dosing, Days",
                                "Clint","Clint Source", "fu", "fu Source", "MW", "LogP", "HL", "pka_Accept","pka_Donor","logPwa")))
 colnames(param_table)<-gsub("pka_Accept", "pka Acceptor", colnames(param_table))
 colnames(param_table)<-gsub("pka_Donor", "pka Donor", colnames(param_table))
+```
 
 #The output file is an excel workbook. This has 2 tabs, one for the PBPK parameters and one for the PBPK results
+
+```{r}
 wb <- createWorkbook()
 addWorksheet(wb, "PBPKresults"); writeData(wb, "PBPKresults", output_table)
 addWorksheet(wb, "PBPKparameters"); writeData(wb, "PBPKparameters", param_table)
@@ -314,11 +510,12 @@ saveWorkbook(wb, file=Userout, overwrite = TRUE)
 
 ## Figure
 An example figure showing time series outputs for each compartment is provided.  This figure shows the concentration profile in each compartment using the first CASRN provided in the chemical list.
+
 ```{r}
 example_cas_index <- which(output_table$CASRN == chemical$CASRN[1])
 
 points_plotted <- unlist(output_table[example_cas_index, 8:ncol(output_table)])
-ymax <- max(as.numeric(points_plotted))*1.1
+ymax <- max(as.numeric(points_plotted),na.rm = T)*1.1
 
 par(las=1)  
 plot(x=as.numeric(output_table[1,8:ncol(output_table)]), 
