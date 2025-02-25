@@ -1,12 +1,11 @@
 ---
 title: "ICE IVIVE workflow"
-Date: 07/06/2023
-#Date: 03/17/2023
+Date: 02/11/2025 updated rat body weight
 Note: Used ICE 4.0 and higher;relies on httk 2.2.2
 output:
+  pdf_document: default
   html_document: default
-  #pdf_document: default
-Author: Inotiv (ICE-support@niehs.nih.gov)
+Author: "Inotiv (ICE-support@niehs.nih.gov)"
 ---
 
 ```{r setup1, include=FALSE}
@@ -52,9 +51,8 @@ output_file: this is the file for the outputs
 
 ```{r}
 chemFile <- "ChemicalData_Rnotebook.txt" #chemicals data from ICE, include CASRN field as identifier
-assayFile <- "InvitroData_Rnotebook.txt" #invitro data from ICE, includes CASRN field as identifier then acc/ac50
-#chemFile <- "ChemicalData_VPA.txt"  
-#assayFile <- "invitroData_VPA.txt"
+assayFile <- "invitroData_Rnotebook.txt" #invitro data from ICE, includes CASRN field as identifier then acc/ac50
+
 Userout <- "User_Results.xlsx"           #file name (and path) for the output file for the tissue; concentrations with EAD estimations along with the in vitro data
 EADplot_file <-"User_plot.pdf"           #the file for the plot of the EAD plot
 invivo <- NULL                           #invivo data provided by user                   
@@ -274,7 +272,7 @@ dpd <- 24/interv #calculating the doses per day
   if(species_1=="Human"){
     physiology.data[4,6] <- bWeight
   }else{
-    physiology.data[2,6] <- bWeight
+    physiology.data[4,4] <- bWeight #the rat body weight
   }
 ```
 
