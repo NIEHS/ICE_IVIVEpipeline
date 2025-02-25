@@ -1,13 +1,12 @@
 ---
 title: "ICE PBPK workflow"
-#Date of latest update: 08/20/2023
-#Date: 03/17/2023
+Date: 02/11/2025 updated rat body weight
 Note: Used ICE 4.0 and higher; relies on httk 2.2.2
 output:
-  #pdf_document: default
-  html_document: NULL
-always_allow_html: yes
-Author: Inotiv (ICE-support@niehs.nih.gov)
+  pdf_document: default
+  html_document: null
+always_allow_html: true
+Author: "Inotiv (ICE-support@niehs.nih.gov)"
 ---
 
 ```{r setup1, include=FALSE}
@@ -181,7 +180,7 @@ Notice that the chemical input has the source of the FU and Clint data. ICE now 
 ```{r}
 chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) #there are single quotes 
                       #in chemical names that need to be addressed, tidyR handles this well
-chemical[1:2,]        #to check the format of inptut data
+chemical[1:2,]        #to check the format of input data
 ```
 
 # Preparing data
@@ -263,7 +262,7 @@ dpd<-24/interv #calculating the doses per day
 if(species_1=="Human"){
   physiology.data[4,6] <- bWeight
 }else{
-  physiology.data[2,6] <- bWeight
+  physiology.data[4,4] <- bWeight #the rat body weight
 }
 ```
 
