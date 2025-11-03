@@ -1,10 +1,12 @@
 ---
 title: "ICE IVIVE workflow"
 Date: 02/11/2025 updated rat body weight
-Note: Used ICE 4.0 and higher;relies on httk 2.2.2
+      10/07/2025 Add set.seed(1234);#Add trim_ws = TRUE,na = c("", "NA") in the read_delim() function;Revise the equation for logKwa;
+        fix the bug where no chemical name was displayed for "50-00-0" (formaldehyde);Testing the body weight related parameters for fetal model;
+Note: Used ICE 4.2 and higher;relies on httk 2.2.2
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 Author: "Inotiv (ICE-support@niehs.nih.gov)"
 ---
 
@@ -21,7 +23,7 @@ opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
 
 # Description
 
-The workflow allows the flexibility to select from five different rat and human PK models: a one-compartment model that incorporates Monte Carlo simulation to simulate the population variance (1C), and four models leveraging the  [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk) which include a 3 compartment model (solve_3comp), a multi-compartment PBPK model for modeling oral and i.v. exposure (solve_pbtk), a multi-compartment PBPK model for modeling inhalation (gas) route of exposure (solve_gas_pbtk), and a multi-compartment human PBPK model that includes both maternal and fetal compartments, and a placenta modeled as a joint organ shared by mother and fetus (solve_fetal_pbtk). The workflow is to predict the equivalent administered dose (EAD) that would lead to steady state plasma concentration or maximum plasma concentration (Cmax) equal to the bioactive concentration from in vitro assays. For inhalation exposures using the (solve_gas_pbtk) EAD is  generated in uM or ppmv if using"concentration" exposure vs a dose. 
+The workflow allows the flexibility to select from five different rat and human PK models: a one-compartment model that incorporates Monte Carlo simulation to simulate the population variance (1c), and four models leveraging the  [EPA's httk package](https://github.com/USEPA/CompTox-ExpoCast-httk) which include a 3 compartment model (solve_3comp), a multi-compartment PBPK model for modeling oral and i.v. exposure (solve_pbtk), a multi-compartment PBPK model for modeling inhalation (gas) route of exposure (solve_gas_pbtk), and a multi-compartment human PBPK model that includes both maternal and fetal compartments, and a placenta modeled as a joint organ shared by mother and fetus (solve_fetal_pbtk). The workflow is to predict the equivalent administered dose (EAD) that would lead to steady state plasma concentration or maximum plasma concentration (Cmax) equal to the bioactive concentration from in vitro assays. For inhalation exposures using the (solve_gas_pbtk) EAD is  generated in uM or ppmv if using"concentration" exposure vs a dose. 
 
 Two example files are included:
 * ChemicalData_Rnotebook.txt
@@ -36,7 +38,8 @@ library(deSolve)
 library(doParallel)
 library(httk)        #this is needed for models: solve_3comp, solve_pbtk, solve_gas_pbtk, solve_fetal_pbtk
                      #The code is compatible with httk_2.2.2
-library(xlsx)        #for writing the excel file that is user output 
+library(readxl)      #for read_excel() #2025
+#library(xlsx)        #for writing the excel file that is user output 
 date <- format(Sys.Date(), format="%y%m%d") #added to add information on date
 
 ```
@@ -52,7 +55,8 @@ output_file: this is the file for the outputs
 ```{r}
 chemFile <- "ChemicalData_Rnotebook.txt" #chemicals data from ICE, include CASRN field as identifier
 assayFile <- "invitroData_Rnotebook.txt" #invitro data from ICE, includes CASRN field as identifier then acc/ac50
-
+#chemFile <- "Template_ICEData.txt"
+#assayFile <- "InvitroData_Rnotebook_10chem.txt"
 Userout <- "User_Results.xlsx"           #file name (and path) for the output file for the tissue; concentrations with EAD estimations along with the in vitro data
 EADplot_file <-"User_plot.pdf"           #the file for the plot of the EAD plot
 invivo <- NULL                           #invivo data provided by user                   
@@ -68,9 +72,17 @@ Details about what model, route, and dose need to be specified. There are differ
 Models type is limited to 5 different models. Currently, species in ICE is limited to human or rat. Using this notebook one can expand the species with minor editing of the code provided the parameters are available. 
 
 ```{r}
+targetTissue <- 'Cplasma'                                                                                     #2025
+  #1c: 'Cplasma'                                                                                              #2025
+  #solve_3comp: 'Cplasma', 'Cliver'                                                                           #2025
+  #solve_pbtk: 'Cplasma', 'Cliver', 'Cgut', 'Clung', 'Ckidney', 'Crest'                                       #2025
+ #solve_gas_pbtk: 'Cplasma', 'Cliver', 'Cgut', 'Clung', 'Ckidney', 'Cmuc', 'Crest'                            #2025
+  #solve_fetal_pbtk: 'Cplasma', 'Cliver', 'Cgut', 'Clung', 'Ckidney', 'Cadipose', 'Crest', 'Cplacenta',       #2025
+targetTissue_fetal <- 'Cfplasma'                                                                              #2025
+  #solve_fetal_pbtk: 'Cfplasma', 'Cfliver', 'Cfgut', 'Cflung', 'Cfkidney', 'Cfbrain', 'Cfthyroid', 'Cfrest'   #2025
 species <- "human"                       #human or rat
 bWeight <- 70                            #the body weight of simulated subject
-modelType <-  "solve_fetal_pbtk"         #"1C", solve_3comp", "solve_pbtk", "solve_gas_pbtk", "solve_fetal_pbtk"; only 1C is capitalized.
+modelType <-  "1c"         #"1c", solve_3comp", "solve_pbtk", "solve_gas_pbtk", "solve_fetal_pbtk"; only 1c is capitalized.
 ```
 
 For the 1 compartment model, values are needed to parameterize the Monte Carlo simulation. 
@@ -86,7 +98,7 @@ The route determines where the chemical will enter the system and route, interva
 route <- "oral"                          #oral, iv, or inhalation needed for PBPK models; "solve_gas_pbtk" uses the inhalation route 
 interv <- 24                             #dosing interval, hours
 ndays <- 3                               #number of days dosing is done
-expDose <- 1                             #current calculations assume 1mg/kg/dose for "1C", "solve_3comp", "solve_pbtk", "solve_fetal_pbtk".   
+expDose <- 1                             #current calculations assume 1mg/kg/dose for "1c", "solve_3comp", "solve_pbtk", "solve_fetal_pbtk".   
 expConc <- 1                             #Dosing for "solve_gas_pbtk" model
 ConcentrationUnit <- "uM"                #Renamed as Output Conc. Units in PBPK tool since ICE4.0. Options are uM and mg/L, but this is not available option for the ICE UI since the unit for in vitro activity concentration provided in ICE is uM; The user need to make sure                                                 
                                          #the unit for in vitro activity concentration is consistent with the "ConcentrationUnit" they select.
@@ -105,7 +117,7 @@ if(gasDosing =="expConc" & (!exists("expConc") || is.null(expConc))){
   expConc <- 1                           #current calculations assume 1uM of air concentration
 }
 gasInputUnit <- "ppmv"                   #Input concentration unit for gas model (httkv2.1.0 and later), "uM" or "ppmv" (default)
-expLength <- .25                         #length of the gas exposure, hours
+expLength <- 0.25                         #length of the gas exposure, hours
 ```
 
 # Gestation model specific parameters
@@ -118,7 +130,7 @@ gestationDays <- 91                #gestation model specific parameter;gestation
 
 ```{r}
 chemDisplay <- "ChemicalName"            #choice is "CASRN" or "ChemicalName"
-if(modelType != "solve_gas_pbtk"){       #"mg/kg/dose" for "1C", "solve_3comp", "solve_pbtk"; uM or ppmv for "solve_gas_pbpk" model
+if(modelType != "solve_gas_pbtk"){       #"mg/kg/dose" for "1c", "solve_3comp", "solve_pbtk"; uM or ppmv for "solve_gas_pbpk" model
   EADUnit <- "mg/kg/dose"
 }else{EADUnit <- gasInputUnit}
                                          
@@ -127,9 +139,8 @@ if(modelType != "solve_gas_pbtk"){       #"mg/kg/dose" for "1C", "solve_3comp", 
 # Load functions
 
 ```{r}
-                                         #All required R scripts and input files should be in the working directory
-source("steadyState.R")                  #required for "1C" model
-source("CalcEAD.R")                      #required for "1C", "solve_3comp", "solve_pbtk", "solve_gas_pbpk" models
+source("steadyState.R")                  #All required R scripts and input files should be in the working directory; required for "1c" model
+source("CalcEAD.R")                      #required for "1c", "solve_3comp", "solve_pbtk", "solve_gas_pbpk" models
 source("EADboxplot.R")
 ```
 
@@ -138,13 +149,16 @@ Notice that the chem input has the source of the FU and Clint data. ICE now has 
 
 ```{r}
 #there are single quotes in chemical names that need to be addressed, the tidyR handles well
-chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) 
-chemical[1:2,]
+#chemical <- as.data.frame(read_delim(chemFile, delim = "\t")) 
+chemical <- as.data.frame(read_delim(chemFile, trim_ws = TRUE,na = c("", "NA"), delim = "\t",quote = "\""))  
+#chemical[1:2,]
 ```
 
 ```{r}
-invitro <- as.data.frame(read_delim(assayFile, delim = "\t"))
-invitro[1:2,]
+#invitro <- as.data.frame(read_delim(assayFile, delim = "\t"))
+invitro <- as.data.frame(read_delim(assayFile, trim_ws = TRUE,na = c("", "NA"), delim = "\t",quote = "\""))
+invitro <- semi_join(invitro, chemical, by = "CASRN")                                  #2025
+#invitro[1:2,]
 ```
 
 # Preparing data
@@ -153,7 +167,12 @@ Partitioning coefficients are obtained by internal function from the httk packag
 Note that a few checks are done. These will generate flags that can be used to follow up as needed.
 
 ```{r}
-##column names should be labeled correctly. RegEx have been used to help, see the example file
+##load data
+chemical <- as.data.frame(read_delim(chemFile, trim_ws = TRUE,na = c("", "NA"), delim = "\t",quote = "\"")) #there are single quotes in chemical names that need to be addressed
+invitro <- as.data.frame(read_delim(assayFile, trim_ws = TRUE,na = c("", "NA"), delim = "\t",quote = "\""))
+invitro <- semi_join(invitro, chemical, by = "CASRN")                                  #2025
+
+##column names should be labeled correctly, see the example file
 ##cleaning the names for taking from an ICE Query-stricter matching is used to handel including the ADME source information
 colnames(chemical)<-gsub(".*Name.*", "ChemicalName", colnames(chemical))
 colnames(chemical)<-gsub(".*Parameters fu.*", "fu", colnames(chemical), ignore.case =TRUE)
@@ -170,27 +189,30 @@ colnames(chemical)<-gsub(".*pKa, Acidic.*", "pka_Donor", colnames(chemical))
 #Converting units for internsic clearance values
 #this moves from log10 ul/ml/10^6 cells to just ul/ml/10^6 cells
 #chemical$Clint<-10^chemical$Clint
-chemical$logPwa<--1*chemical$HL #this gets the water octanal coeff
-#Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
+chemical$logPwa<--1*(chemical$HL+1.61) #this gets the water-air partition coefficient, as the unit for HL from OPERA is (LogHL,atm-m^3/mole),logaw=logHL-logRT=logHL-log(0.0244)for T=298.15K  #2025 #Add the flag here as a warning if model not appropriate or other issues related to generating predictions for a chemical
 chemical$Flag <-""
 #catch for low Fu
 chemical$Flag[chemical$fu<=1e-10]<-"fu is zero,likely due to rounding. Setting to 1e-5"
 chemical$fu[chemical$fu<=1e-10]<-1e-5
 ```
 
-# 1C modeling
-If modelType given by the user is "1C"
-This will run a simple, 1 compartment model. In this model the C steady state is determined vs the C max from the other models.
+# 1c modeling
+If modelType given by the user is "1c"
+This will run a simple, 1 compartment model. In this model the C steady state is determined vs the Cmax from the other models.
 
 # Calculating the EADs
-The 1C model has a monte carlo simulation that calculates the Css at the 50th and the 95th percentile
+The 1c model has a monte carlo simulation that calculates the Css at the 50th and the 95th percentile
 The first step is generating the CSS object with the call to "steadState". 
 
 ```{r}
-### model "1C"
-if(modelType == "1C"){
+### starting to model
+p.out_all <- NULL
 
-  chemInput <- chemical[,c("CASRN", "ChemicalName", "Clint", "fu", "MW", "Flag")]
+### model "1c"
+if(modelType == "1c"){
+  chemInput <- chemical
+  #chemInput <- chemical[,c("CASRN", "ChemicalName", "Clint", "fu", "MW", "Flag")]
+  set.seed(1234)
   CSS<- steadyState(inputData = chemInput, nsamples = nsamples, species = species, ConcentrationUnit = ConcentrationUnit)
   head(CSS)
 
@@ -214,79 +236,97 @@ if(modelType == "1C"){
   CSS2<-left_join(CSS2, chemical %>% select(any_of( c("CASRN","Clint Source", "fu Source"))))
 
   #reformatting columns to match the other models:
-  CSS2<-CSS2 %>% select(any_of(c("CASRN", "ChemicalName", "Css, 50%ile", "Css, 95%ile", "Css, Units", "Flag",
-                               "Species", "Model", "Route", "Dose, mg/kg", "Clint", "Clint Source", "fu", "fu Source", "MW")))
+  CSS2<-CSS2 %>% select(any_of(c("CASRN", "ChemicalName", "Css, 50%ile", "Css, 95%ile", "Css, Units", "Flag", "Species", "Model", "Route", "Dose, mg/kg", "Clint", "Clint Source", "Clint_InputSource", "fu", "fu Source", "fu_InputSource", "MW", "MW_InputSource", "LogP", "LogP_InputSource", "HL", "HL_InputSource", "pka_Accept", "pka_Accept_InputSource", "pka_Donor", "pka_Donor_InputSource")))  #2025June 
   ssEAD.out<-EAD.out[,c("CASRN", setdiff(colnames(EAD.out), c(colnames(invitro), "50%","95%")))]
   outputData<-full_join(CSS2,ssEAD.out)
   colnames(outputData)<-gsub("Clint$", "Clint, ul/ml/10^6 cells", colnames(outputData))#add units
-
+  p.out_all <- CSS2 %>% select(any_of(c("CASRN", "ChemicalName", "LogP", "LogP_InputSource", "Clint", "Clint Source", "Clint_InputSource", "fu", "fu Source", "fu_InputSource", "pka_Donor", "pka_Donor_InputSource", "pka_Accept", "pka_Accept_InputSource", "HL", "HL_InputSource", "MW", "MW_InputSource", "Flag")))  #2025June
+  p.out_all<- p.out_all %>% rename("Log of Henry’s Law constant" = "HL")
+ 
   #The output file is an excel workbook. This has 2 tabs, one for the EAD results and the other for the invitro data
-  xlsx::write.xlsx(file=Userout,x=outputData, sheetName ="EADResults", append=FALSE, row.names = FALSE, showNA = FALSE) #starting a new book
-  xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE)    #adding in vitro data
+  xlsx::write.xlsx(file=Userout, x=outputData, sheetName ="EADResults", append=FALSE, row.names = FALSE, showNA = FALSE) #starting a new book
+  xlsx::write.xlsx(file=Userout, x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE)    #adding in vitro data
+  xlsx::write.xlsx(file=Userout, x=p.out_all, sheetName ="PKparameters", append=TRUE, row.names = FALSE, showNA = FALSE) #adding parameters for populating PK/PBPK models
 
   #To view the results, the "EADboxplot" function plots the values. 
   EADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD", EADUnit = EADUnit, species = species, route = route, modelType = modelType, chemDisplay = chemDisplay, axis.text=4)
   #Arguments for EADplot functions include "EAD.out, invivo, label, chemDisplay, EADUnit, modelType, species, route, date, doses.per.day, wth, axis.text, title.text, shape.size, dpi" 
   EADplot
-  }
+ }
 ```
 
 
 # script to run pbpk models from httk package
 This code is used if modelType given by the user is a PBPK model: "solve_3comp", "solve_pbtk", "solve_gas_pbpk", or "solve_fetal_pbtk.
 This is wrapper code to format the inputs and parameters needed to run the models specified by the httk package.
-In addition, the output is formatted so that it matches the 1C model. This allows easy comparison between the different files for subsequent processing.
+In addition, the output is formatted so that it matches the 1c model. This allows easy comparison between the different files for subsequent processing.
 
 ## Parameter processing for the pbpk models
 The httk package needs some additional parameters including the correct capitalization of the species and ensuring that the adding of the user-specified data to the chem table is properly integrated.
 
 ```{r}
-# preprocessing variables:
-if (tolower(species) == "rat") {
-  species_1 <- "Rat"
-}
-if (tolower(species) == "human") {
-  species_1 <- "Human"
-}
-options(stringsAsFactors = FALSE)
-# add chemical info to the table. Using variable coming from ICE
-# to deal with mapping issues
-chemical$DTXSID2<-paste0(chemical$DTXSID, "_n")
-if(species_1=="Human"){
-  chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu",  pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW", logHenry="HL"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
-}else{
-  chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu",  pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW", logHenry="HL"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
-  chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu"), species = "Human", reference = paste0(species_1, "ICE"), overwrite = T) #addresses bug issues where look up from human bc assume no rat
-}
- 
+if(modelType %in% c("solve_3comp", "solve_pbtk", "solve_gas_pbtk", "solve_fetal_pbtk")){
+  # preprocessing variables:
+  if (tolower(species) == "rat") {
+    species_1 <- "Rat"
+  }
+  if (tolower(species) == "human") {
+    species_1 <- "Human"
+  }
+  options(stringsAsFactors = FALSE)
+  # add chemical info to the table. Using variable coming from ICE
+  # to deal with mapping issues
+  chemical$DTXSID2<-paste0(chemical$DTXSID, "_n")
+  if(species_1=="Human"){
+    chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu",  pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW", logHenry="HL"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
+  }else{
+    chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu",  pKa_Donor = 'pka_Donor', pKa_Accept = 'pka_Accept', logP = "LogP", logPwa = "logPwa", MW = "MW", logHenry="HL"), species = species_1, reference = paste0(species_1, "ICE"), overwrite = T)
+    chem.physical_and_invitro.data <- add_chemtable(chemical, current.table = chem.physical_and_invitro.data, data.list = list( CAS = "CASRN",DTXSID="DTXSID2",Clint = "Clint", Funbound.plasma = "fu"), species = "Human", reference = paste0(species_1, "ICE"), overwrite = T) #addresses bug issues where look up from human bc assume no rat
+  }
+
+# to allow the user to change the body weight for rat and human
+  if(species_1=="Human"){  
+    physiology.data[4,6] <- bWeight 
+  }else{
+    physiology.data[4,4] <- bWeight #Average rat body weight,changed from [2,6] to [4,4]
+  }  
+  
 if(route != "iv"){
   iv.dose = FALSE
 }else{iv.dose =TRUE}
 
 dpd <- 24/interv #calculating the doses per day
-```
-
-# to allow the user to change the body weight for rat and human
-
-```{r}
-  if(species_1=="Human"){
-    physiology.data[4,6] <- bWeight
-  }else{
-    physiology.data[4,4] <- bWeight #the rat body weight
-  }
+cmaxall <- NULL
+}
 ```
 
 # solve_3comp model
 The [solve_3comp](https://rdrr.io/cran/httk/man/solve_3comp.html) model is a 3 compartment model that has the gut,gut lumen, liver, and rest of the body compartments with the plasma equivalent to the liver plasma concentrations.
 
 ```{r solve3c}
+# note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
 if(modelType == "solve_3comp"){
-  cmaxall <- NULL
-  # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   for(this.cas in chemical[,"CASRN"]) {
-    concMax <- max(solve_3comp(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
+    set.seed(1234)
+    Kliver2pu  <- chemical$Kliver2pu[chemical$CASRN == this.cas]    
+    Krest2pu   <- chemical$Krest2pu[chemical$CASRN == this.cas]     
+    Kgut2pu    <- chemical$Kgut2pu[chemical$CASRN == this.cas]      
+    param <- parameterize_3comp(chem.cas = this.cas, species = species_1, default.to.human = TRUE)
+    print(param$BW)  # to make sure that the body weight had been changed.
+    param$Kliver2pu <- ifelse(!is.na(Kliver2pu), Kliver2pu , param$Kliver2pu)            #2025June
+    param$Kliver2pu_Source <- ifelse(!is.na(Kliver2pu), "CUSTOM", "httkCalculated")      #2025June 
+    param$Krest2pu <- ifelse(!is.na(Krest2pu), Krest2pu, param$Krest2pu)                 #2025June
+    param$Krest2pu_Source <- ifelse(!is.na(Krest2pu), "CUSTOM", "httkCalculated")        #2025June 
+    param$Kgut2pu <- ifelse(!is.na(Kgut2pu), Kgut2pu, param$Kgut2pu)                     #2025June
+    param$Kgut2pu_Source <- ifelse(!is.na(Kgut2pu), "CUSTOM", "httkCalculated")          #2025June
+    p.out0 <- as.data.frame(param)       #automatically resets row names       #for output #2025
+    colnames(p.out0) <- paste0("ModelParam_", colnames(p.out0))                #for output #2025  
+    rownames(p.out0)<- this.cas                                                #for output #2025
+    p.out <- rownames_to_column(p.out0, var = "CASRN")                         #for output #2025
+    concMax <- max(solve_3comp(chem.cas = this.cas, parameters = param, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,targetTissue])
     cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
     cmaxall <- rbind(cmaxall, cmax_temp)
+    p.out_all <- rbind(p.out_all, p.out)    #2025
   }
 }
 ```
@@ -296,37 +336,52 @@ the [solve_pbtk](https://rdrr.io/cran/httk/man/solve_pbtk.html) model is a PBPK 
 
 ```{r solveptpk} 
 if(modelType == "solve_pbtk"){
-  cmaxall <- NULL
-  # note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   for(this.cas in chemical[,"CASRN"]) {
-      #p<-parameterize_pbtk(chem.cas = this.cas, species = species_1, default.to.human = TRUE) # to confirm the actual body weight used in simulation
-      #print(p$BW) 
-      if(route == "oral"){
-      concMax <- max(solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
-    }else if(route =="iv"){
-      output0 <- solve_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
-      #store output
-      trim_output <- as.data.frame(output0)
-      #ignore possible computational errors
-      to_ignore <- 2 #<- time point 2 will always be anomalous
-      n_to_ignore <- max(1,floor((24*ndays)/interv))
-      if((24/interv) == 1){
-        steps_between_doses <- 97
-      }else if(24/interv > 1){
-        steps_between_doses <- floor(97 / (24/interv))+1
-      }else if(24/interv < 1){
-        steps_between_doses <- floor(97 / (24/interv))
+      set.seed(1234)
+      Kkidney2pu <- chemical$Kkidney2pu[chemical$CASRN == this.cas]
+      Kliver2pu  <- chemical$Kliver2pu[chemical$CASRN == this.cas]  
+      Krest2pu   <- chemical$Krest2pu[chemical$CASRN == this.cas]   
+      Kgut2pu    <- chemical$Kgut2pu[chemical$CASRN == this.cas]     
+      param <- parameterize_pbtk(chem.cas = this.cas, species = species_1, default.to.human = TRUE)
+      print(param$BW)  # to make sure that the body weight had been changed.
+      param$Kkidney2pu <- ifelse(!is.na(Kkidney2pu), Kkidney2pu, param$Kkidney2pu)         #2025June
+      param$Kkidney2pu_Source <- ifelse(!is.na(Kkidney2pu), "CUSTOM", "httkCalculated")    #2025June 
+      param$Kliver2pu <- ifelse(!is.na(Kliver2pu), Kliver2pu , param$Kliver2pu )          #2025June
+      param$Kliver2pu_Source <- ifelse(!is.na(Kliver2pu), "CUSTOM", "httkCalculated")    #2025June 
+      param$Krest2pu <- ifelse(!is.na(Krest2pu), Krest2pu, param$Krest2pu)                 #2025June
+      param$Krest2pu_Source <- ifelse(!is.na(Krest2pu), "CUSTOM", "httkCalculated")        #2025June 
+      param$Kgut2pu <- ifelse(!is.na(Kgut2pu), Kgut2pu, param$Kgut2pu)                     #2025June
+      param$Kgut2pu_Source <- ifelse(!is.na(Kgut2pu), "CUSTOM", "httkCalculated")          #2025June
+      p.out0 <- as.data.frame(param)       #automatically resets row names       #for output #2025
+      colnames(p.out0) <- paste0("ModelParam_", colnames(p.out0))                #for output #2025  
+      rownames(p.out0)<- this.cas                                                #for output #2025
+      p.out <- rownames_to_column(p.out0, var = "CASRN")                         #for output #2025
+      output0 <- solve_pbtk(chem.cas = this.cas, parameters = param, doses.per.day = dpd, days = ndays, dose=0, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)
+      trim_output <- as.data.frame(output0) #store output
+
+      if(route =="iv"){
+        #ignore possible computational errors
+        to_ignore <- 2 #<- time point 2 will always be anomalous
+       n_to_ignore <- max(1,floor((24*ndays)/interv))
+        if((24/interv) == 1){
+          steps_between_doses <- 97
+        }else if(24/interv > 1){
+          steps_between_doses <- floor(97 / (24/interv))+1
+        }else if(24/interv < 1){
+          steps_between_doses <- floor(97 / (24/interv))
+        }
+        for(i in 1:n_to_ignore){
+          to_ignore[i+1] = to_ignore[i] + steps_between_doses
+        }
+        trim_output <- trim_output[-to_ignore,]
       }
-      for(i in 1:n_to_ignore){
-        to_ignore[i+1] = to_ignore[i] + steps_between_doses
-      }
-      trim_output <- trim_output[-to_ignore,]
-      concMax <-max(trim_output[,'Cplasma'])
-    }
-    cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
-    cmaxall <- rbind(cmaxall, cmax_temp)
+      
+      concMax <-max(trim_output[,targetTissue])
+      cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
+      cmaxall <- rbind(cmaxall, cmax_temp)
+      p.out_all <- rbind(p.out_all, p.out)    #2025
   }
-  }
+ }
 ```
 
 # solve_gas_pbtk model
@@ -338,21 +393,39 @@ if(modelType == "solve_gas_pbtk"){
   chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag!=""] <-"fu is zero,likely due to rounding. Setting to 1e-5; Chemical likely nonvolatile, consider appropriateness of model"
   chemical$Flag[chemical$HL <= -7.80388 & chemical$Flag==""] <-"Chemical likely nonvolatile, consider appropriateness of model"
 
-  cmaxall <- NULL
-  #note that dose=0 stops the initial dosing of the compartments and is needed to accurately model the specified dosing situation
   for(this.cas in chemical[,"CASRN"]) {
-  
+    set.seed(1234)
+    Kkidney2pu <- chemical$Kkidney2pu[chemical$CASRN == this.cas]  
+    Kliver2pu  <- chemical$Kliver2pu[chemical$CASRN == this.cas]   
+    Krest2pu   <- chemical$Krest2pu[chemical$CASRN == this.cas]    
+    Kgut2pu    <- chemical$Kgut2pu[chemical$CASRN == this.cas]   
     # --- expDose option has currently been disabled due to a bug in the httk package ---
     # if(modelType=="solve_gas_pbtk" & gasDosing == "expDose"){
     #   ConcentrationUnit <- "uM"  # output unit only has one option of "uM" for solve_gas_pbtk model
-    #   concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
+    #   concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = dpd, days = ndays, tsteps = 4, dose=0, daily.dose = expDose*dpd, exp.conc = 0, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,targetTissue])
     # }
     
-    if(modelType == "solve_gas_pbtk"& gasDosing == "expConc"){
-      concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = NULL, doses.per.day = NULL, days = ndays, tsteps = 4, dose=NULL, daily.dose = NULL, exp.conc = expConc, input.units = gasInputUnit, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, suppress.messages = TRUE)[,'Cplasma'])
-    } #note for v2.2.2, must specify total "daily.dose" when "doses.per.day" is not set to NULL.
+    if(gasDosing == "expConc"){
+      param <- parameterize_gas_pbtk(chem.cas = this.cas, species = species_1, default.to.human = TRUE)
+      print(param$BW)  # to make sure that the body weight had been changed.
+      param$Kkidney2pu <- ifelse(!is.na(Kkidney2pu), Kkidney2pu, param$Kkidney2pu)         #2025June
+      param$Kkidney2pu_Source <- ifelse(!is.na(Kkidney2pu), "CUSTOM", "httkCalculated")    #2025June 
+      param$Kliver2pu <- ifelse(!is.na(Kliver2pu), Kliver2pu , param$Kliver2pu )           #2025June
+      param$Kliver2pu_Source <- ifelse(!is.na(Kliver2pu), "CUSTOM", "httkCalculated")      #2025June 
+      param$Krest2pu <- ifelse(!is.na(Krest2pu), Krest2pu, param$Krest2pu)                 #2025June
+      param$Krest2pu_Source <- ifelse(!is.na(Krest2pu), "CUSTOM", "httkCalculated")        #2025June 
+      param$Kgut2pu <- ifelse(!is.na(Kgut2pu), Kgut2pu, param$Kgut2pu)                     #2025June
+      param$Kgut2pu_Source <- ifelse(!is.na(Kgut2pu), "CUSTOM", "httkCalculated")          #2025June
+      p.out0 <- as.data.frame(param)       #automatically resets row names       #for output #2025
+      colnames(p.out0) <- paste0("ModelParam_", colnames(p.out0))                #for output #2025  
+      rownames(p.out0)<- this.cas                                                #for output #2025
+      p.out <- rownames_to_column(p.out0, var = "CASRN")                         #for output #2025
+      concMax <- max(solve_gas_pbtk(chem.cas = this.cas, parameters = param, doses.per.day = NULL, days = ndays, dose = NULL, daily.dose = NULL, exp.conc = expConc,  input.units = gasInputUnit, period=interv, exp.duration = expLength, output.units = ConcentrationUnit, species = species_1, default.to.human = TRUE, plots = F, adjusted.Funbound.plasma = TRUE, suppress.messages = TRUE)[,targetTissue]) 
+      #note for v2.2.2, must specify total "daily.dose" when "doses.per.day" is not set to NULL.
+    } 
     cmax_temp <- as.data.frame(cbind(this.cas, concMax, ConcentrationUnit))
     cmaxall <- rbind(cmaxall,cmax_temp)
+    p.out_all <- rbind(p.out_all, p.out)    #2025
   }
 }  
 ```
@@ -362,44 +435,63 @@ The [solve_fetal_pbtk](https://rdrr.io/cran/httk/man/solve_fetal_pbtk.html) is a
   
 ```{r}
 if(modelType == "solve_fetal_pbtk"){
-  
-  if(species_1 == "Rat"){
+  if(species_1 != "Human"){
       stop("Gestation model is for human only")
   }  
   if(gestationDays < 91 || gestationDays > 280) {
     print("Warning: the gestation day is the day when dosing starts, which shall be within the range of 91-280 days")
   }
-    
-  cmaxall <- NULL
+  
   for(this.cas in chemical[,"CASRN"]) {
-     if(species_1 == "Human" && route == "oral"){
-      concMax <- max(solve_fetal_pbtk(chem.cas = this.cas, times=seq(gestationDays, gestationDays+ndays, 0.025), doses.per.day = dpd, dose= NULL, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = "human", default.to.human = TRUE, plots = FALSE, suppress.messages = TRUE)[,'Cplasma'])
-      #note - httk v2.1.0 and later, species = "human" is the default
-      fconcMax <- max(solve_fetal_pbtk(chem.cas = this.cas, times=seq(gestationDays, gestationDays+ndays, 0.025), doses.per.day = dpd, dose= NULL, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = "human", default.to.human = TRUE, plots = FALSE, suppress.messages = TRUE)[,'Cfplasma'])
-    } #initial.values = NULL; #times: time sequence in days. Default is from 13th week of pregnancy to 40th week due to data constraints; times = seq(13 * 7, 40 * 7, 1)
-     else if(species_1 == "Human" && route =="iv"){
-      output0 <- solve_fetal_pbtk(chem.cas = this.cas, times=seq(gestationDays, gestationDays+ndays, 0.025), doses.per.day = dpd, dose= NULL, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = "human", default.to.human = TRUE, plots = FALSE, suppress.messages = TRUE)
+     set.seed(1234)
+     Kkidney2pu <- chemical$Kkidney2pu[chemical$CASRN == this.cas]  
+     Kliver2pu  <- chemical$Kliver2pu[chemical$CASRN == this.cas]    
+     Krest2pu   <- chemical$Krest2pu[chemical$CASRN == this.cas]     
+     Kgut2pu    <- chemical$Kgut2pu[chemical$CASRN == this.cas]      
+     param <- parameterize_fetal_pbtk(chem.cas = this.cas, species = "human", default.to.human = TRUE)
+     print(param$BW)  # to make sure that the body weight had been changed 
+     param$Kkidney2pu <- ifelse(!is.na(Kkidney2pu), Kkidney2pu, param$Kkidney2pu)         #2025June
+     param$Kkidney2pu_Source <- ifelse(!is.na(Kkidney2pu), "CUSTOM", "httkCalculated")    #2025June 
+     param$Kliver2pu <- ifelse(!is.na(Kliver2pu), Kliver2pu , param$Kliver2pu )          #2025June
+     param$Kliver2pu_Source <- ifelse(!is.na(Kliver2pu), "CUSTOM", "httkCalculated")    #2025June 
+     param$Krest2pu <- ifelse(!is.na(Krest2pu), Krest2pu, param$Krest2pu)                 #2025June
+     param$Krest2pu_Source <- ifelse(!is.na(Krest2pu), "CUSTOM", "httkCalculated")        #2025June 
+     param$Kgut2pu <- ifelse(!is.na(Kgut2pu), Kgut2pu, param$Kgut2pu)                     #2025June
+     param$Kgut2pu_Source <- ifelse(!is.na(Kgut2pu), "CUSTOM", "httkCalculated")          #2025June
+     p.out0 <- as.data.frame(param)       #automatically resets row names  #for output #2025
+     colnames(p.out0) <- paste0("ModelParam_", colnames(p.out0))           #for output #2025  
+     rownames(p.out0)<- this.cas                                           #for output #2025
+     p.out <- rownames_to_column(p.out0, var = "CASRN")                    #for output #2025
+     
+
+      output0  <- solve_fetal_pbtk(chem.cas = this.cas, parameters = param, times=seq(gestationDays, gestationDays+ndays, 0.025), doses.per.day = dpd, dose= NULL, daily.dose = expDose*dpd, iv.dose = iv.dose, output.units = ConcentrationUnit, species = "human", default.to.human = TRUE, plots = FALSE, suppress.messages = TRUE) #note - httk v2.1.0 and later, species = "human" is the default
+      #initial.values = NULL; #times: time sequence in days. Default is from 13th week of pregnancy to 40th week due to data constraints; times = seq(13 * 7, 40 * 7, 1)
       #store output
       trim_output <- as.data.frame(output0)
-      #ignore computational errors
-      to_ignore <- 2 #<- time point 2 will always be anomalous
-      n_to_ignore <- max(1,floor((24*ndays)/interv))
-      if((24/interv) == 1){
-        steps_between_doses <- 41
-      }else if(24/interv > 1){
-        steps_between_doses <- floor(41 / (24/interv))+1
-      }else if(24/interv < 1){
-        steps_between_doses <- floor(41 / (24/interv))
-      }
-      for(i in 1:n_to_ignore){
-        to_ignore[i+1] = to_ignore[i] + steps_between_doses
+     
+      if(route =="iv"){
+       #ignore computational errors
+        to_ignore <- 2 #<- time point 2 will always be anomalous
+        n_to_ignore <- max(1,floor((24*ndays)/interv))
+        if((24/interv) == 1){
+          steps_between_doses <- 41
+        }else if(24/interv > 1){
+          steps_between_doses <- floor(41 / (24/interv))+1
+        }else if(24/interv < 1){
+          steps_between_doses <- floor(41 / (24/interv))
+        }
+       for(i in 1:n_to_ignore){
+         to_ignore[i+1] = to_ignore[i] + steps_between_doses
       }
       trim_output <- trim_output[-to_ignore,]
-      concMax <-max(trim_output[,'Cplasma'])  
-      fconcMax <- max(trim_output[,'Cfplasma'])
-    }  #initial.values = NULL; #times: time sequence in days. Default is from 13th week of pregnancy to 40th due to data constraints; times = seq(13 * 7, 40 * 7, 1)
-    cmax_temp <- as.data.frame(cbind(this.cas, concMax, fconcMax, ConcentrationUnit))
-    cmaxall <- rbind(cmaxall,cmax_temp)
+      }  
+      
+      concMax <-max(trim_output[,targetTissue])  
+      fconcMax <- max(trim_output[,targetTissue_fetal])
+      #initial.values = NULL; #times: time sequence in days. Default is from 13th week of pregnancy to 40th due to data constraints; times = seq(13 * 7, 40 * 7, 1)
+      cmax_temp <- as.data.frame(cbind(this.cas, concMax, fconcMax, ConcentrationUnit))
+      cmaxall <- rbind(cmaxall,cmax_temp)
+      p.out_all <- rbind(p.out_all, p.out)    #2025
   }
 }  
 ```
@@ -408,14 +500,19 @@ if(modelType == "solve_fetal_pbtk"){
 The PBPK models currently give estimates based on the median (50%ile) of the population. As such there is minor formatting that needs to be done to generate the EAD predictions and make the output file
 
 ```{r}
-if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_gas_pbtk"){
-  cmaxall$concMax <- as.numeric(cmaxall$concMax) 
-  #they are bound as characters so converting to numeric
-
+if(modelType %in% c("solve_3comp", "solve_pbtk", "solve_gas_pbtk", "solve_fetal_pbtk")){
+  cmaxall$concMax <- as.numeric(cmaxall$concMax) #they are bound as characters so converting to numeric
   Cmax <- merge(chemical, cmaxall, by.x="CASRN", by.y="this.cas")
   names(Cmax) <- gsub("concMax", "Cmax", names(Cmax) )
-  #Calculating the EADs
+}
+```
+
+#Calculating the EADs from non- solve_fetal_pbtk
+
+```{r}
+if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_gas_pbtk"){
   EAD.out_max <- CalcEAD(Css = Cmax[,c("CASRN", "Cmax")], inVitro = invitro)
+  
   #creating output file for user, should have EAD values and the parameters for calculating the circulating concentration
   Cmax2<-as.data.frame(Cmax, stringsAsFactors=FALSE)
   #adding in the source of the parameters
@@ -426,6 +523,8 @@ if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_
   Cmax2$Route <- route
   Cmax2$"Dose Interval, hrs" <- interv
   Cmax2$"Length of Dosing, Days" <- ndays
+  Cmax2$"Target Tissue" <- targetTissue
+  Cmax2$"Target Fetal Tissue" <- targetTissue_fetal
   if(modelType =="solve_gas_pbtk" && gasDosing =="expConc"){        #for if inhalation/gas
     Cmax2$"Exposure Concentration"<-expConc           
     Cmax2$"Exposure Concentration Unit"<-gasInputUnit   
@@ -435,20 +534,18 @@ if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_
    }  
   
   #reformatting columns to match the other models:
-  Cmax2<-Cmax2 %>% select(any_of(c("CASRN", "ChemicalName", "Cmax", "Cmax, Units", "Flag", "Species","Model",
-                                   "Route", "Dose, mg/kg","Exposure Concentration","Exposure Concentration Unit", "Exposure Length, hr", "Exposure Period, hr",
-                                   "Dose Interval, hrs", "Length of Dosing, Days", "Clint", "Clint Source", "fu", "fu Source","MW")))
-
+  Cmax2<-Cmax2 %>% select(any_of(c("CASRN", "ChemicalName", "Target Tissue", "Cmax", "Cmax, Units", "Flag", "Species", "Model", "Route", "Dose, mg/kg", "Exposure Concentration", "Exposure Concentration Unit", "Exposure Length, hr", "Exposure Period, hr", "Dose Interval, hrs", "Length of Dosing, Days", "Clint", "Clint Source", "Clint_InputSource", "fu", "fu Source", "fu_InputSource", "MW", "MW_InputSource", "LogP", "LogP_InputSource", "HL", "HL_InputSource", "pka_Accept", "pka_Accept_InputSource", "pka_Donor", "pka_Donor_InputSource"))) #2025June 
+  
   outputData<-full_join(Cmax2,ssEAD.out)
   colnames(outputData)<-gsub("Clint$", "Clint, ul/ml/10^6 cells", colnames(outputData)) #add units
 
   #The output file is an excel workbook. This has 2 tabs, one for the EAD results and the other for the invitro data
   xlsx::write.xlsx(file=Userout,x=outputData, sheetName ="EADResults", append=FALSE, row.names = FALSE, showNA = FALSE) #starting a new book
   xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE)    #adding in vitro data
-
+ xlsx::write.xlsx(file=Userout,x=p.out_all, sheetName ="PKparameters", append=TRUE, row.names = FALSE, showNA = FALSE)    #adding in vitro data
+ 
   #to view the results, the "EADboxplot" function plots the values. 
   #Note that if the gas model is used EADUnit needs to be changed to "uM"
-
   #plotting
   EADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD", EADUnit = EADUnit, species = species, route = route, modelType = modelType, doses.per.day = dpd, date = date, chemDisplay = chemDisplay, axis.text=4) 
   #Arguments for EADplot functions include "EAD.out, invivo, label, chemDisplay, EADUnit, modelType, species, route, date, doses.per.day, wth, axis.text, title.text, shape.size, dpi"
@@ -460,14 +557,12 @@ if(modelType == "solve_3comp" | modelType == "solve_pbtk" | modelType == "solve_
 The PBPK models currently give estimates based on the median (50%ile) of the population. As such there is minor formatting that needs to be done to generate the EAD predictions and make the output file
 
 ```{r}
+#Calculating the EADs corresponding to maternal and fetal plasma Cmax
 if(modelType == "solve_fetal_pbtk"){
-  cmaxall$concMax <- as.numeric(cmaxall$concMax) 
-  #they are bound as characters so converting to numeric
-
-  Cmax <- merge(chemical, cmaxall, by.x="CASRN", by.y="this.cas")
-  names(Cmax) <- gsub("concMax", "Cmax", names(Cmax) )
-  #Calculating the EADs corresponding to maternal and fetal plasma Cmax
   EAD.out_max <- CalcEAD(Css = Cmax[,c("CASRN", "Cmax")], inVitro = invitro)
+  EAD.out_fmax <- CalcEAD(Css = Cmax[,c("CASRN", "fCmax")], inVitro = invitro)
+  
+  #creating output file for UI. Only Sciome need to use this file  
   EAD.out50<-EAD.out_max
   colnames(EAD.out50)<-gsub("EAD","EAD.50_Cmax", colnames(EAD.out50))
   EAD.out95<-cbind(EAD.out50[1], matrix(NA, nrow=nrow(EAD.out50), ncol = ncol(EAD.out50)-1))
@@ -475,9 +570,8 @@ if(modelType == "solve_fetal_pbtk"){
   #add in the flag after creating the "95" object
   EAD.out50<-left_join(chemical[,c("CASRN","Flag")],EAD.out50)
   EAD.out<-left_join(EAD.out50,EAD.out95)
-  EAD.out<-EAD.out[,setdiff(colnames(EAD.out), c("adj.fu",'fu', "arm", "adj.arm"))]
-
-  EAD.out_fmax <- CalcEAD(Css = Cmax[,c("CASRN", "fCmax")], inVitro = invitro)
+  EAD.out<-EAD.out[,setdiff(colnames(EAD.out), c("adj.fu", 'fu', "arm", "adj.arm"))] 
+  
   EAD.out50_fmax<-EAD.out_fmax
   colnames(EAD.out50_fmax)<-gsub("EAD","EAD.50_fCmax", colnames(EAD.out50_fmax)) #rename EAD to fetal EAD which corresponds to fetal plasma Cmax; this is the same as "EAD.Fmax.50th" shown in the ICE4.0 IVIVE tool
   EAD.out95_fmax<-cbind(EAD.out50_fmax[1], matrix(NA, nrow=nrow(EAD.out50_fmax), ncol = ncol(EAD.out50_fmax)-1))
@@ -488,7 +582,7 @@ if(modelType == "solve_fetal_pbtk"){
   EAD.out_fmax<-EAD.out_fmax[,setdiff(colnames(EAD.out_fmax), c("adj.fu",'fu', "arm", "adj.arm"))]
 
   EAD.out_both<-left_join(EAD.out, EAD.out_fmax)
-  
+
   #creating output file for user, should have EAD values and the parameters for calculating the circulating concentration
   Cmax2<-as.data.frame(Cmax, stringsAsFactors=FALSE);
   #adding in the source of the parameters
@@ -499,20 +593,20 @@ if(modelType == "solve_fetal_pbtk"){
   Cmax2$Route <- route
   Cmax2$"Dose Interval, hrs" <- interv
   Cmax2$"Length of Dosing, Days" <- ndays
+  Cmax2$"Target Tissue" <- targetTissue
+  Cmax2$"Target Fetal Tissue" <- targetTissue_fetal
   #reformatting columns to match the other models:
-  Cmax2<-Cmax2 %>% select(any_of(c("CASRN", "ChemicalName", "Cmax", "fCmax", "Cmax, Units","Flag", "Species","Model", "Route", "Dose, mg/kg", "Exposure Concentration", "Exposure Concentration Unit", "Exposure Length, hr", "Exposure Period, hr", "Dose Interval, hrs", "Length of Dosing, Days", "Clint", "Clint Source", "fu","fu Source", "MW")))
-
+  Cmax2<-Cmax2 %>% select(any_of(c("CASRN", "ChemicalName", "Target Tissue", "Cmax", "Target Fetal Tissue", "fCmax", "Cmax, Units", "Flag", "Species", "Model", "Route", "Dose, mg/kg", "Exposure Concentration", "Exposure Concentration Unit", "Exposure Length, hr", "Exposure Period, hr", "Dose Interval, hrs", "Length of Dosing, Days", "Clint", "Clint Source", "Clint_InputSource", "fu", "fu Source", "fu_InputSource", "MW", "MW_InputSource", "LogP", "LogP_InputSource", "HL", "HL_InputSource", "pka_Accept", "pka_Accept_InputSource", "pka_Donor", "pka_Donor_InputSource"))) #2025June
   outputData<-full_join(Cmax2,ssEAD.out)
   colnames(outputData)<-gsub("Clint$", "Clint, ul/ml/10^6 cells", colnames(outputData))#add units
 
   #The output file is an excel workbook. This has 2 tabs, one for the EAD results and the other for the invitro data
-
   xlsx::write.xlsx(file=Userout,x=outputData, sheetName ="EADResults", append=FALSE, row.names = FALSE, showNA = FALSE) #starting a new book
   xlsx::write.xlsx(file=Userout,x=invitro, sheetName ="inVitroData", append=TRUE, row.names = FALSE, showNA = FALSE) 
-
+  xlsx::write.xlsx(file=Userout,x=p.out_all, sheetName ="PKparameters", append=TRUE, row.names = FALSE, showNA = FALSE) #adding parameters for populating PK/PBPK models
+  
   #to view the results, the "EADboxplot" function plots the values. 
   #Note that if the gas model is used EADUnit needs to be changed to "uM" or "ppmv"
-
   #plotting
   EADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD.50_Cmax", EADUnit = EADUnit, species = species, route = route, modelType = modelType, doses.per.day = dpd, date = date, chemDisplay = chemDisplay, axis.text=4) 
   fEADplot <- EADboxplot(EAD.out = outputData, invivo = invivo, label="EAD.50_fCmax", EADUnit = EADUnit, species = species, route = route, modelType = modelType, doses.per.day = dpd, date = date, chemDisplay = chemDisplay, axis.text=4) 
